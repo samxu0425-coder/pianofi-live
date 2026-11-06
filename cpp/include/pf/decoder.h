@@ -30,6 +30,10 @@ struct DecoderConfig {
     float thr_offset = 1.0f;
     float thr_frame = 0.5f;
     double min_duration = 0.08;
+    // Drop frames no pending decision needs, so a long live session doesn't
+    // grow without limit. Off by default: with it on, a peak that sits on a
+    // run of more than kTrimSlack equal values could be judged differently.
+    bool trim_history = false;
 };
 
 class NoteDecoder {
@@ -48,6 +52,8 @@ public:
     void finish();
 
     size_t frames() const { return n_; }
+    size_t frames_kept() const { return n_ - base_; }  // how many are still in memory
+    static constexpr size_t kTrimSlack = 64;           // frames kept behind each scan position
     // Final notes, sorted by onset then pitch, min_duration filter applied.
     std::vector<Note> notes() const;
 
@@ -69,10 +75,14 @@ private:
     void advance(int j);
     void scan_peaks(int j, const std::vector<float>& a, float thr, size_t& scan, std::vector<Peak>& out);
     bool try_finish_note(int j);
-    float at(const std::vector<float>& a, size_t i, int j) const { return a[i * cfg_.num_note + j]; }
+    void trim();
+    // Frame i of an array. Frames before base_ have been dropped.
+    float at(const std::vector<float>& a, size_t i, int j) const { return a[(i - base_) * cfg_.num_note + j]; }
+    int velocity_at(size_t i, int j) const { return int(velocity_[(i - base_) * cfg_.num_note + j]); }
 
     DecoderConfig cfg_;
-    size_t n_ = 0;
+    size_t n_ = 0;     // frames received so far
+    size_t base_ = 0;  // frames dropped from the front of the arrays
     bool finished_ = false;
     std::vector<float> onset_, offset_, mpe_;
     std::vector<int64_t> velocity_;

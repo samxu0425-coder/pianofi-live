@@ -15,6 +15,28 @@ void NoteDecoder::add_frames(const float* onset, const float* offset, const floa
     velocity_.insert(velocity_.end(), velocity, velocity + k);
     n_ += count;
     for (int j = 0; j < cfg_.num_note; ++j) advance(j);
+    if (cfg_.trim_history) trim();
+}
+
+// Drop the frames that no pitch needs any more. A pitch still needs:
+//   - a little history behind its two scan positions (a peak test looks back
+//     until the value changes, almost always one frame), and
+//   - everything from the onset of its oldest unfinished note (its velocity,
+//     and the frame values after it).
+void NoteDecoder::trim() {
+    size_t keep = n_;
+    for (const PitchState& s : st_) {
+        const size_t scan = std::min(s.onset_scan, s.offset_scan);
+        keep = std::min(keep, scan > kTrimSlack ? scan - kTrimSlack : 0);
+        if (s.next_onset < s.onsets.size()) keep = std::min(keep, s.onsets[s.next_onset].loc);
+    }
+    if (keep < base_ + 1024) return;  // not worth moving memory yet
+    const size_t drop = (keep - base_) * size_t(cfg_.num_note);
+    onset_.erase(onset_.begin(), onset_.begin() + drop);
+    offset_.erase(offset_.begin(), offset_.begin() + drop);
+    mpe_.erase(mpe_.begin(), mpe_.begin() + drop);
+    velocity_.erase(velocity_.begin(), velocity_.begin() + drop);
+    base_ = keep;
 }
 
 void NoteDecoder::finish() {
@@ -31,7 +53,7 @@ void NoteDecoder::scan_peaks(int j, const std::vector<float>& a, float thr, size
         const float v = at(a, i, j);
         if (v >= thr) {
             bool left = true;
-            for (size_t ii = i; ii-- > 0;) {
+            for (size_t ii = i; ii-- > base_;) {  // base_ is 0 unless history was trimmed
                 const float u = at(a, ii, j);
                 if (v > u) { left = true; break; }
                 if (v < u) { left = false; break; }
@@ -68,7 +90,7 @@ void NoteDecoder::advance(int j) {
     if (note_on_) {
         for (size_t k = before; k < s.onsets.size(); ++k) {
             const Peak& p = s.onsets[k];
-            const int vel = int(velocity_[p.loc * cfg_.num_note + j]);
+            const int vel = velocity_at(p.loc, j);
             if (vel > 0) note_on_(Note{j + cfg_.note_min, p.time, p.time, vel}, p.loc);
         }
     }
@@ -130,7 +152,7 @@ bool NoteDecoder::try_finish_note(int j) {
     else if (!flag_offset && flag_mpe) off = double(m) * h;
     else off = (loc_offset <= size_t(m)) ? time_offset : double(m) * h;
 
-    const int vel = int(velocity_[i * cfg_.num_note + j]);
+    const int vel = velocity_at(i, j);
     if (vel > 0) {
         Note note{j + cfg_.note_min, on.time, off, vel};
         // Python trims the previous note of this pitch if the new one starts

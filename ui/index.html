@@ -60,6 +60,8 @@ ws.onmessage = (message) => handleEvent(JSON.parse(message.data));
 playButton.onclick = () => {
   if (running) {  // only possible with live input, where the button turns into Stop
     ws.send("stop");
+    statusText.textContent = "Stopping...";  // the engine finishes its last notes first
+    playButton.disabled = true;
     return;
   }
   running = true;
@@ -110,6 +112,8 @@ function handleEvent(e) {
       if (e.offset - e.onset < MIN_NOTE_SEC) notes.splice(index, 1);
       else notes[index].offset = e.offset;
     }
+  } else if (e.type === "warning") {
+    statusText.textContent = e.text;
   } else if (e.type === "end") {
     const now = songTime();
     for (const n of notes) if (n.offset === null) n.offset = now;  // a stopped engine sends no more "off" events

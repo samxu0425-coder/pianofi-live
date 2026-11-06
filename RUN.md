@@ -10,12 +10,17 @@ What's here:
 | `cpp/` | Engine: audio thread → ring buffer → mel → frame model + h cache → time model → note decoder |
 | `eval/score_engine.py` | F1 vs batch, decoder check vs `mpe2note`, appends a row to `results.md` |
 | `eval/sweep.py` | Runs the grid (CPU/GPU, cache on/off, strides, A/B heads) and scores every run |
+| `eval/level_eval.py` | Automatic input level: quiet, tilted and dipping copies of each song, scored against batch |
+| `eval/memory_check.py` | Long sessions: dropping old history changes no notes and keeps memory bounded |
+| `eval/gpu_memory.py` | GPU memory one engine run takes |
+| `ui/server.py`, `ui/index.html` | Live piano roll for a wav file, the mic, or whatever the PC is playing |
 
-Already verified in a Linux sandbox (not yet on your PC): C++ unit tests pass, the mel matches
-torch.stft + an HTK/slaney filterbank to 2.5e-5, the engine's cached/uncached/any-stride outputs
-match a Python stream simulation exactly (with stand-in models of the same shape), and the note
-decoder matches a transcription of `mpe2note` on 40 random fuzz cases. Not verified: anything with
-the real model weights. Steps 2, 4 and 5 below are where that gets checked.
+All of this has run on Sam's PC with the real model weights. Every measured number, with the
+command that produced it, is in results.md.
+
+Run one engine at a time. One engine takes about 3 GB of GPU memory at the default settings
+(6 GB without the cache), and two at once fight over it and crawl. Closing games and other
+GPU-heavy apps first avoids the same problem.
 
 ## 1. Python packages (in the .venv)
 
@@ -117,7 +122,7 @@ For whatever the PC is playing (Spotify, YouTube), or the mic:
 ```
 
 Press Play, then play your music. The page doesn't play anything itself here, and the button
-turns into Stop. Stop ends the engine at once, so that run's notes.csv is not written.
+turns into Stop. Stop lets the engine finish its last notes and write `runs\ui\notes.csv`.
 
 ### Live input (mic or system audio)
 
@@ -127,14 +132,40 @@ cpp\build\Release\pianofi_live.exe --input mic --stride 16 --delay 16
 ```
 
 `loopback` captures whatever the PC is playing (Spotify, YouTube) through WASAPI loopback, so no
-virtual cable is needed. `mic` uses the default microphone. Ctrl+C stops, or `--max-seconds X`.
+virtual cable is needed. `mic` uses a microphone. It runs until Ctrl+C (or `--max-seconds X`),
+then finishes its last notes and writes notes.csv and metrics.json.
 Set the CUDA PATH line from step 3 first: on the CPU the engine can't keep up.
 
+Both use the Windows default device unless you name one. The default microphone is not always the
+one that works (on Sam's PC it is a virtual device that delivers silence):
+
+```powershell
+cpp\build\Release\pianofi_live.exe --list-devices
+cpp\build\Release\pianofi_live.exe --input mic --device CMTECK --stride 16 --delay 16
+```
+
+`--device` takes any part of a name from the list. `ui\server.py` accepts `--device` too.
+
+What to know about live audio:
+
+- **Loopback hears everything.** Other apps' sounds (a call, a video, a notification) are mixed in
+  and get transcribed too. For clean results, let only the music play.
+- **Volume is corrected automatically.** Live audio arrives at whatever level the PC's sound setup
+  gives it (on Sam's PC, loopback came in anywhere from 0.03x to 0.85x of the file's level), and the
+  model finds fewer notes in quiet audio. So for mic and loopback the engine scales the audio until
+  the loudest peak of the last 10 s is at full scale (`cpp/include/pf/auto_gain.h`).
+  `--no-normalize` turns it off. `--normalize` turns it on for a wav file, to test it.
+- **Silence stays on the clock.** Windows sends no loopback samples while nothing is playing, so
+  the engine plays its own silent stream to keep them coming.
+- **It can't undo tone changes.** Sound effects or an equalizer on the output device change what
+  loopback captures. Turn them off for the closest match to the file.
+- **Memory stays bounded.** Live input drops mel and decoder frames once nothing needs them.
+  `--bounded-memory` does the same for a wav file, to test it.
 - Needs the lock-free ring buffer (the default build), because the audio callback must not lock.
 - Live audio is converted to 16 kHz mono by Windows and miniaudio, not by torchaudio like
   `py\prep_audio.py`, so the samples differ slightly. F1 checks stay on file input.
-- The engine keeps every frame in memory, so memory grows with session length. Live input stops
-  after 1 hour unless `--max-seconds` says otherwise.
+- `cpp\build\Release\capture_dump.exe loopback|mic SECONDS RATE OUT.wav` records what the capture
+  path delivers, to check it against a file (RATE 0 = the device's own rate).
 - `cpp\third_party\miniaudio.h` is miniaudio v0.11.26 (public domain or MIT-0).
 
 ## 6. The lock-free ring buffer
@@ -149,6 +180,21 @@ cpp\build\Release\bench_ring.exe
 ```
 
 `bench_ring` prints throughput and push latency for both. Results are in results.md.
+
+## 7. Checks for live input
+
+These use wav files, so they are repeatable. Each appends its table to results.md.
+
+```powershell
+.venv\Scripts\python.exe eval\level_eval.py
+.venv\Scripts\python.exe eval\memory_check.py
+.venv\Scripts\python.exe eval\gpu_memory.py test_audio\16k\<song>.wav
+```
+
+- `level_eval.py`: about 20 minutes. Shows what quiet or tilted audio costs, and what the automatic
+  input level gets back.
+- `memory_check.py`: about 20 minutes. Exit code 1 if dropping old history changed any note.
+- `gpu_memory.py`: about 5 minutes. Close other GPU apps first.
 
 ## Next steps (not built yet)
 

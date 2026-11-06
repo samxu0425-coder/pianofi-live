@@ -3,7 +3,10 @@
 //   pianofi_live --wav test_audio\song_16k.wav [options]
 //   pianofi_live --input mic|loopback [options]        Ctrl+C stops
 //
+//   pianofi_live --list-devices                        names for --device
+//
 //   --input KIND      file (default), mic, or loopback (what the PC is playing)
+//   --device NAME     live input: part of a device name (default: the Windows default device)
 //   --models DIR     folder with frame.onnx, time.onnx, sv_<style>.bin (default: models)
 //   --style NAME      style vector file sv_NAME.bin (default: level2)
 //   --stride N        output frames per pass, 16 ms each (default: 32 = 0.512 s)
@@ -12,11 +15,15 @@
 //   --no-cache        recompute all 512 frames every pass (the baseline to beat)
 //   --fast            don't pace audio in real time (accuracy runs; no lag numbers)
 //   --events          print one JSON line per note event to stdout; logs go to stderr
+//   --normalize       automatic input level: scale the audio so its loudest recent peak is
+//   --no-normalize    full scale. On by default for mic and loopback, off for wav files.
 //   --cpu             use the CPU even if CUDA is available (default: try CUDA)
 //   --threads N       ONNX Runtime intra-op threads
 //   --out DIR         where notes.csv and metrics.json go (default: runs/<timestamp>)
 //   --dump            also write raw model outputs + mel to --out for the Python checks
-//   --max-seconds X   only use the first X seconds of the wav; live input stops after X (default 3600)
+//   --max-seconds X   only use the first X seconds of the wav; live input stops after X
+//                     (default: live input runs until Ctrl+C)
+//   --bounded-memory  drop history that is no longer needed, as live input always does (for tests)
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -33,10 +40,12 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
 #include <timeapi.h>
 #pragma comment(lib, "winmm.lib")
 #endif
 
+#include "pf/capture.h"
 #include "pf/engine.h"
 #include "pf/wav.h"
 
@@ -111,10 +120,34 @@ std::string json_escape(const std::string& s) {
 std::atomic<bool> g_stop{false};
 void on_ctrl_c(int) { g_stop.store(true); }
 
+// The most memory this process has held at once, in MB. 0 where it isn't measured.
+double peak_memory_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters))
+        return double(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+#endif
+    return 0.0;
+}
+
+int list_devices() {
+    try {
+        std::printf("Microphones (--input mic):\n");
+        for (const auto& name : pf::Capture::device_names(false)) std::printf("  %s\n", name.c_str());
+        std::printf("Outputs (--input loopback):\n");
+        for (const auto& name : pf::Capture::device_names(true)) std::printf("  %s\n", name.c_str());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "error: %s\n", e.what());
+        return 1;
+    }
+    return 0;
+}
+
 int usage() {
     std::fprintf(stderr,
-                 "usage: pianofi_live (--wav FILE | --input mic|loopback) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
-                 "                    [--no-cache] [--fast] [--events] [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X]\n");
+                 "usage: pianofi_live (--wav FILE | --input mic|loopback [--device NAME] | --list-devices) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
+                 "                    [--no-cache] [--fast] [--events] [--normalize | --no-normalize] [--bounded-memory]\n"
+                 "                    [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X]\n");
     return 2;
 }
 
@@ -128,6 +161,7 @@ int main(int argc, char** argv) {
     pf::EngineConfig cfg;
     pf::ModelOptions mopt;
     bool try_cuda = true, dump = false;
+    int normalize = -1;  // -1 = not given: on for live input, off for files
     double max_seconds = 0;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -138,6 +172,8 @@ int main(int argc, char** argv) {
         try {
             if (a == "--wav") wav_path = next();
             else if (a == "--input") input_name = next();
+            else if (a == "--device") cfg.device = next();
+            else if (a == "--list-devices") return list_devices();
             else if (a == "--models") models = next();
             else if (a == "--style") style = next();
             else if (a == "--stride") cfg.stride = std::stoi(next());
@@ -146,6 +182,9 @@ int main(int argc, char** argv) {
             else if (a == "--no-cache") cfg.cache = false;
             else if (a == "--fast") cfg.realtime = false;
             else if (a == "--events") cfg.events = true;
+            else if (a == "--normalize") normalize = 1;
+            else if (a == "--no-normalize") normalize = 0;
+            else if (a == "--bounded-memory") cfg.bounded_memory = true;
             else if (a == "--cpu") try_cuda = false;
             else if (a == "--threads") mopt.threads = std::stoi(next());
             else if (a == "--out") out_dir = next();
@@ -162,10 +201,14 @@ int main(int argc, char** argv) {
     else if (input_name != "file") return usage();
     const bool live = cfg.input != pf::Input::File;
     if (live != wav_path.empty()) return usage();  // exactly one of a wav file or a live input
+    cfg.normalize = normalize == -1 ? live : normalize == 1;
     if (live) {
         if (max_seconds > 0) cfg.max_seconds = max_seconds;
         cfg.stop = &g_stop;
         std::signal(SIGINT, on_ctrl_c);  // finish cleanly, so notes and metrics get written
+#ifdef SIGBREAK
+        std::signal(SIGBREAK, on_ctrl_c);  // Ctrl+Break: what ui/server.py sends on Windows
+#endif
     }
     if (out_dir.empty()) out_dir = "runs/" + timestamp();
     FILE* log = cfg.events ? stderr : stdout;  // with --events, stdout is only JSON
@@ -202,16 +245,20 @@ int main(int argc, char** argv) {
             model = std::make_unique<pf::Model>(mopt);
         }
 
-        std::fprintf(log, "%s: %.1f s, provider %s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s\n",
-                     live ? input_name.c_str() : wav_path.c_str(), live ? cfg.max_seconds : double(wav.mono.size()) / 16000,
+        char length[48];
+        if (live && cfg.max_seconds <= 0) std::snprintf(length, sizeof length, "until stopped");
+        else std::snprintf(length, sizeof length, "%.1f s", live ? cfg.max_seconds : double(wav.mono.size()) / 16000);
+        std::fprintf(log, "%s: %s, provider %s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s%s\n",
+                     live ? input_name.c_str() : wav_path.c_str(), length,
                      model->provider(), cfg.stride, cfg.stride * 16.0,
                      cfg.delay, cfg.delay * 16.0, cfg.heads, cfg.cache ? "cached" : "no cache",
-                     cfg.realtime ? "real time" : "fast");
+                     cfg.realtime ? "real time" : "fast", cfg.normalize ? ", auto level" : "");
 
         // Warm-up: the first ONNX Runtime run (especially on CUDA) is slow.
         {
             pf::EngineConfig warm = cfg;
             warm.input = pf::Input::File;
+            warm.normalize = false;
             warm.stop = nullptr;
             warm.realtime = false;
             warm.events = false;
@@ -225,6 +272,8 @@ int main(int argc, char** argv) {
         pf::Engine engine(*model, sv, cfg);
         pf::Metrics mx;
         const auto notes = engine.run(wav.mono, mx);
+        // A live run stopped before any audio arrived has nothing to divide by.
+        const double rtf = mx.audio_sec > 0 ? mx.compute_sec / mx.audio_sec : 0.0;
 
         {
             std::ofstream f(out_dir + "/notes.csv");
@@ -253,13 +302,18 @@ int main(int argc, char** argv) {
             f << "  \"heads\": \"" << mx.heads << "\",\n";
             f << "  \"cache\": " << (mx.cache ? "true" : "false") << ",\n";
             f << "  \"realtime\": " << (mx.realtime ? "true" : "false") << ",\n";
+            f << "  \"normalize\": " << (cfg.normalize ? "true" : "false") << ",\n";
+            f << json_stats("gain", mx.gain) << ",\n";
             f << "  \"audio_sec\": " << mx.audio_sec << ",\n";
             f << "  \"wall_sec\": " << mx.wall_sec << ",\n";
             f << "  \"compute_sec\": " << mx.compute_sec << ",\n";
-            f << "  \"real_time_factor\": " << mx.compute_sec / mx.audio_sec << ",\n";
+            f << "  \"real_time_factor\": " << rtf << ",\n";
             f << "  \"passes\": " << mx.passes << ",\n";
             f << "  \"notes\": " << mx.notes << ",\n";
             f << "  \"overrun_samples\": " << mx.overrun_samples << ",\n";
+            f << "  \"peak_memory_mb\": " << peak_memory_mb() << ",\n";
+            f << "  \"max_mel_frames\": " << mx.max_mel_frames << ",\n";
+            f << "  \"max_decoder_frames\": " << mx.max_decoder_frames << ",\n";
             f << json_stats("frame_model_ms", mx.frame_ms) << ",\n";
             f << json_stats("time_model_ms", mx.time_ms) << ",\n";
             f << json_stats("decode_ms", mx.decode_ms) << ",\n";
@@ -272,10 +326,15 @@ int main(int argc, char** argv) {
 
         const Stats pass = stats(mx.pass_ms), lag = stats(mx.frame_lag_ms), nlag = stats(mx.note_lag_ms);
         std::fprintf(log, "passes %zu | pass ms p50 %.1f p99 %.1f | real-time factor %.3f | overruns %zu samples\n",
-                     mx.passes, pass.p50, pass.p99, mx.compute_sec / mx.audio_sec, mx.overrun_samples);
+                     mx.passes, pass.p50, pass.p99, rtf, mx.overrun_samples);
         if (cfg.realtime)
             std::fprintf(log, "frame lag ms p50 %.0f p99 %.0f | note-on lag ms p50 %.0f p99 %.0f\n", lag.p50, lag.p99,
                          nlag.p50, nlag.p99);
+        if (cfg.normalize) {
+            const Stats gain = stats(mx.gain);
+            std::fprintf(log, "input gain p50 x%.2f, lowest x%.2f, highest x%.2f\n", gain.p50,
+                         mx.gain.empty() ? 0.0 : *std::min_element(mx.gain.begin(), mx.gain.end()), gain.max);
+        }
         std::fprintf(log, "%zu notes -> %s\n", notes.size(), out_dir.c_str());
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

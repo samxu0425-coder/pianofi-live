@@ -39,6 +39,9 @@ target_link_libraries(bench_ring PRIVATE pf_core)
 add_executable(mel_dump tools/mel_dump.cpp)
 target_link_libraries(mel_dump PRIVATE pf_core)
 
+add_executable(capture_dump tools/capture_dump.cpp)
+target_link_libraries(capture_dump PRIVATE pf_core)
+
 if(PF_WITH_ONNX)
   if(NOT ONNXRUNTIME_DIR)
     message(FATAL_ERROR "Set -DONNXRUNTIME_DIR=<path to unzipped onnxruntime release>, or -DPF_WITH_ONNX=OFF")

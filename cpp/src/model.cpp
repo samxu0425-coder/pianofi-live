@@ -47,6 +47,9 @@ Model::Model(const ModelOptions& opt) : impl_(std::make_unique<Impl>()) {
         disable_tf32();
         OrtCUDAProviderOptions cuda_opts{};
         cuda_opts.device_id = 0;
+        // Grow the GPU memory pool by what is asked for, not in powers of two (the
+        // default). Measured on the RTX 4070: 3.1 GB instead of 4.8 GB, same speed.
+        cuda_opts.arena_extend_strategy = 1;  // kSameAsRequested
         so.AppendExecutionProvider_CUDA(cuda_opts);  // throws if the CUDA EP is missing
         impl_->cuda = true;
     }

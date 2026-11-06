@@ -86,13 +86,11 @@ F1 vs batch notes (50 ms onsets, offsets ignored). Lag = time from audio arrivin
 | 2026-11-06 01:02 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CPU | 512 ms | b | no | 0.1083 | 0.0172 | 0.0297 | 3751.4 | 4027.9 | not measured | not measured | 2.014 | 787072 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --models models --out runs\686610__seth_makes_sounds__bubbglegum-pop-song_first60s-cpu-nocache-512ms --dump --cpu --no-cache --stride 32` |
 | 2026-11-06 01:02 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CPU | 512 ms | b | yes | 0.1132 | 0.0794 | 0.0933 | 832.9 | 994.4 | not measured | not measured | 1.118 | 341984 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --models models --out runs\686610__seth_makes_sounds__bubbglegum-pop-song_first60s-cpu-cache-512ms --dump --cpu --stride 32` |
 | 2026-11-06 01:21 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA | 256 ms + delay 512 ms | b | yes | 0.9241 | 0.9284 | 0.9263 | 52.9 | 70.2 | not measured | not measured | 0.215 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 16 --delay 32 --fast --dump --out runs\delay-s16-d32` |
-| 2026-11-06 01:22 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 178.2 | 277.2 | not measured | not measured | 0.023 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
 | 2026-11-06 01:24 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA | 256 ms + delay 512 ms | b | yes | 0.9196 | 0.9378 | 0.9286 | 59.9 | 75.7 | 1265 | 1401 | 0.252 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 32 --dump --out runs\delay-s16-d32-rt` |
 | 2026-11-06 02:01 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 63.2 | 75.6 | 1013 | 1144 | 0.267 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs\delay-s16-d16-rt` |
-| 2026-11-06 02:11 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 187.8 | 284.8 | not measured | not measured | 0.025 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
 | 2026-11-06 02:12 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 62.2 | 77.4 | 1013 | 1144 | 0.261 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs\spsc-s16-d16-rt` |
-| 2026-11-06 02:22 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 188.7 | 289.4 | not measured | not measured | 0.025 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
 | 2026-11-06 02:42 | prettifun - Light (Instrumental) - swagdisease (128k).wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.8421 | 0.9192 | 0.8790 | 54.9 | 73.0 | not measured | not measured | 0.221 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav "test_audio\16k\prettifun - Light (Instrumental) - swagdisease (128k).wav" --stride 16 --delay 16 --fast --dump --out runs\prettifun-s16-d16` |
+| 2026-11-06 05:42 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 172.0 | 238.3 | not measured | not measured | 0.022 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
 
 ## Ring buffer benchmark, 2026-11-06
 
@@ -194,3 +192,121 @@ Same machine and device as above. Windows master volume was 65% (read about 10 m
 | loopback | 60.0 | 256 | 59.0 | 76.9 | 1012 | 1144 | 0 | 120 |
 
 F1 vs batch: not measured, for the same reason.
+
+## GPU memory per engine, 2026-11-06 04:37
+
+Command: `python eval\gpu_memory.py test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10
+
+686610__seth_makes_sounds__bubbglegum-pop-song.wav, file input, `--fast`, one engine at a time. GPU memory is the peak rise in `nvidia-smi` memory.used during the run, sampled every 0.5 s, so short spikes can be missed.
+
+| settings | GPU memory MB | pass p50 ms | pass max ms |
+|---|---|---|---|
+| stride 256 ms + delay 256 ms, cached | 3083 | 52.3 | 71 |
+| stride 64 ms, cached | 2907 | 50.8 | 76 |
+| stride 256 ms, no cache | 6001 | 162.6 | 193 |
+| stride 8192 ms (batch windows) | 6180 | 171.4 | 240 |
+
+## Live input with automatic level, 2026-11-06 04:59
+
+Command: `python ui\server.py --input loopback`, then Play in the page, while `test_audio\686610__seth_makes_sounds__bubbglegum-pop-song.wav` played on the PC, then Stop. The engine ran `--input loopback --stride 16 --delay 16 --events` with automatic input level on.
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10. Device: Speakers (Realtek(R) Audio) (WASAPI, device format 16000 Hz, 2 channels). CUDA, lock-free ring buffer.
+
+| input | seconds | passes | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | overruns | notes | gain p50 | gain max |
+|---|---|---|---|---|---|---|---|---|---|---|
+| loopback | 66.8 | 262 | 66.2 | 75.4 | 1011 | 1140 | 0 | 938 | x1.34 | x14.64 |
+
+F1 vs batch: not measured (a live capture has no fixed start time). Stop ended the engine cleanly (exit code 0, notes.csv and metrics.json written).
+
+## Automatic input level, 2026-11-06 05:02
+
+Command: `python eval\level_eval.py`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10
+
+Whole songs through the engine (file input, stride 256 ms + delay 256 ms), changed as the first column says. P, R and F1 are against batch notes of the original file (50 ms onsets, offsets ignored). "Tone tilt" is the treble boost measured on this PC's sound output. "Dip" is x0.4 volume with 20 s at x0.03 in the middle.
+
+### 479957__liezen3__panflute-phrase-and-piano.wav
+
+42.0 s, file peak 0.248, 141 batch notes.
+
+| input | auto level | notes | P | R | F1 | median gain |
+|---|---|---|---|---|---|---|
+| file as is | off | 149 | 0.9262 | 0.9787 | 0.9517 | - |
+| file as is | on | 163 | 0.7914 | 0.9149 | 0.8487 | x4.41 |
+| x0.4 | off | 127 | 0.9528 | 0.8582 | 0.9030 | - |
+| x0.4 | on | 163 | 0.7914 | 0.9149 | 0.8487 | x11.03 |
+| x0.1 | off | 80 | 0.9375 | 0.5319 | 0.6787 | - |
+| x0.1 | on | 164 | 0.8049 | 0.9362 | 0.8656 | x32.00 |
+| x0.03 | off | 27 | 1.0000 | 0.1915 | 0.3214 | - |
+| x0.03 | on | 149 | 0.9262 | 0.9787 | 0.9517 | x32.00 |
+| tone tilt, x0.4 | off | 131 | 0.9389 | 0.8723 | 0.9044 | - |
+| tone tilt, x0.4 | on | 161 | 0.7888 | 0.9007 | 0.8411 | x10.63 |
+| dip | off | 71 | 0.8873 | 0.4468 | 0.5943 | - |
+| dip | on | 145 | 0.8138 | 0.8369 | 0.8252 | x11.31 |
+
+### 686610__seth_makes_sounds__bubbglegum-pop-song.wav
+
+119.0 s, file peak 0.879, 1495 batch notes.
+
+| input | auto level | notes | P | R | F1 | median gain |
+|---|---|---|---|---|---|---|
+| file as is | off | 1521 | 0.9211 | 0.9371 | 0.9290 | - |
+| file as is | on | 1592 | 0.8838 | 0.9411 | 0.9116 | x1.30 |
+| x0.4 | off | 1385 | 0.9191 | 0.8515 | 0.8840 | - |
+| x0.4 | on | 1592 | 0.8838 | 0.9411 | 0.9116 | x3.26 |
+| x0.1 | off | 1003 | 0.8923 | 0.5987 | 0.7166 | - |
+| x0.1 | on | 1577 | 0.8928 | 0.9418 | 0.9167 | x13.03 |
+| x0.03 | off | 350 | 0.9429 | 0.2207 | 0.3577 | - |
+| x0.03 | on | 1520 | 0.9224 | 0.9378 | 0.9300 | x32.00 |
+| tone tilt, x0.4 | off | 1479 | 0.9040 | 0.8943 | 0.8991 | - |
+| tone tilt, x0.4 | on | 1651 | 0.8613 | 0.9512 | 0.9040 | x2.70 |
+| dip | off | 1231 | 0.9050 | 0.7452 | 0.8173 | - |
+| dip | on | 1516 | 0.8852 | 0.8977 | 0.8914 | x3.26 |
+
+### prettifun - Light (Instrumental) - swagdisease (128k).wav
+
+185.0 s, file peak 1.061, 557 batch notes.
+
+| input | auto level | notes | P | R | F1 | median gain |
+|---|---|---|---|---|---|---|
+| file as is | off | 608 | 0.8421 | 0.9192 | 0.8790 | - |
+| file as is | on | 599 | 0.8464 | 0.9102 | 0.8772 | x0.96 |
+| x0.4 | off | 370 | 0.8703 | 0.5781 | 0.6947 | - |
+| x0.4 | on | 599 | 0.8464 | 0.9102 | 0.8772 | x2.41 |
+| x0.1 | off | 165 | 0.7758 | 0.2298 | 0.3546 | - |
+| x0.1 | on | 599 | 0.8464 | 0.9102 | 0.8772 | x9.65 |
+| x0.03 | off | 45 | 0.8000 | 0.0646 | 0.1196 | - |
+| x0.03 | on | 597 | 0.8492 | 0.9102 | 0.8787 | x32.00 |
+| tone tilt, x0.4 | off | 423 | 0.8558 | 0.6499 | 0.7388 | - |
+| tone tilt, x0.4 | on | 640 | 0.8016 | 0.9210 | 0.8571 | x2.15 |
+| dip | off | 344 | 0.8663 | 0.5350 | 0.6615 | - |
+| dip | on | 572 | 0.8409 | 0.8636 | 0.8521 | x2.42 |
+
+## Long-session memory, 2026-11-06 05:18
+
+Command: `python eval\memory_check.py`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10
+
+File input, `--fast`. "Dropped" runs use `--bounded-memory`, which is what live input always does.
+
+| song | settings | notes | notes identical with history dropped |
+|---|---|---|---|
+| 479957__liezen3__panflute-phrase-and-piano.wav | `--stride 16 --delay 16` | 149 | yes |
+| 479957__liezen3__panflute-phrase-and-piano.wav | `--stride 4` | 135 | yes |
+| 686610__seth_makes_sounds__bubbglegum-pop-song.wav | `--stride 16 --delay 16` | 1521 | yes |
+| 686610__seth_makes_sounds__bubbglegum-pop-song.wav | `--stride 4` | 1389 | yes |
+| prettifun - Light (Instrumental) - swagdisease (128k).wav | `--stride 16 --delay 16` | 608 | yes |
+| prettifun - Light (Instrumental) - swagdisease (128k).wav | `--stride 4` | 574 | yes |
+
+The test songs repeated to the given length, stride 256 ms + delay 256 ms. Frames held = the most kept in memory at once. Old mel frames are dropped in every run without `--dump`, so only the decoder column differs. Peak memory is the whole process, which includes about 1 GB of CUDA libraries and the wav file itself (3.7 MB per minute).
+
+| length | history | decoder frames held | mel frames held | peak memory MB |
+|---|---|---|---|---|
+| 5 min | kept | 18944 | 4205 | 994 |
+| 5 min | dropped | 1296 | 4205 | 962 |
+| 20 min | kept | 75264 | 4205 | 1183 |
+| 20 min | dropped | 1490 | 4205 | 1019 |
