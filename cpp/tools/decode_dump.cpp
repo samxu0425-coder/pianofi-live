@@ -3,6 +3,8 @@
 // notes as CSV. Used by py/check_decoder.py to test the streaming decoder.
 //
 //   decode_dump DIR [chunk]
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>

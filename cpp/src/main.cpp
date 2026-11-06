@@ -33,8 +33,10 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -43,6 +45,8 @@
 #include <psapi.h>
 #include <timeapi.h>
 #pragma comment(lib, "winmm.lib")
+#else
+#include <sys/resource.h>
 #endif
 
 #include "pf/capture.h"
@@ -126,6 +130,9 @@ double peak_memory_mb() {
     PROCESS_MEMORY_COUNTERS counters;
     if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters))
         return double(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+#else
+    rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) return double(usage.ru_maxrss) / 1024.0;  // Linux reports KB
 #endif
     return 0.0;
 }

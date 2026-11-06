@@ -196,6 +196,29 @@ These use wav files, so they are repeatable. Each appends its table to results.m
 - `memory_check.py`: about 20 minutes. Exit code 1 if dropping old history changed any note.
 - `gpu_memory.py`: about 5 minutes. Close other GPU apps first.
 
+## 8. Linux build in Docker (written, NOT yet run)
+
+The `Dockerfile` builds the engine on Linux with CUDA 12, cuDNN 9 and ONNX Runtime 1.20.1, and
+runs `pf_tests` as part of the build. Nobody has built or run it yet: this PC has no Docker, and
+virtualization is off in its BIOS. Until it has run, treat every step here as untested.
+
+Needs: virtualization on in the BIOS, Docker Desktop (WSL 2 backend), and a current NVIDIA driver.
+
+```powershell
+docker build -t pianofi-live .
+docker run --rm --gpus all -v ${PWD}\models:/work/models -v ${PWD}\test_audio:/work/test_audio -v ${PWD}\runs:/work/runs pianofi-live --wav test_audio/16k/<song>.wav --stride 512 --fast --dump --out runs/docker_check512
+.venv\Scripts\python.exe eval\score_engine.py runs\docker_check512 test_audio\16k\<song>.wav
+```
+
+- The first command fails if `pf_tests` fails on Linux.
+- The second runs the engine in the container. The first line it prints must say `provider CUDA`.
+  "CUDA unavailable" means the container can't see the GPU.
+- The third scores that run on Windows, like step 4. Expect the same: array check PASSED, decoder
+  check PASSED, F1 = 1.0000.
+- `score_engine.py` writes this PC's name in the machine column. For a run made on another machine
+  (a cloud GPU), fix that column by hand, or the row is wrong.
+- Mic and loopback input do not work in the container: a server has no sound card.
+
 ## Next steps (not built yet)
 
 - GPU-side h cache (IOBinding) so the 512-frame window isn't copied to the GPU every pass.

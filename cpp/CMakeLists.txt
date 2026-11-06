@@ -24,7 +24,7 @@ find_package(Threads REQUIRED)
 
 add_library(pf_core STATIC src/wav.cpp src/mel.cpp src/decoder.cpp src/capture.cpp)
 target_include_directories(pf_core PUBLIC include PRIVATE third_party)
-target_link_libraries(pf_core PUBLIC Threads::Threads)
+target_link_libraries(pf_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS})  # miniaudio loads audio libraries at run time
 if(PF_USE_SPSC)
   target_compile_definitions(pf_core PUBLIC PF_USE_SPSC)
   target_sources(pf_core PRIVATE src/spsc_ring_buffer.cpp)

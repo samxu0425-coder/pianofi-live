@@ -2,7 +2,9 @@
 // [frames][256], for py/check_mel.py to compare against Pipeline.wav2feature.
 //
 //   mel_dump input_16k.wav out.f32
+#include <algorithm>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <vector>
 

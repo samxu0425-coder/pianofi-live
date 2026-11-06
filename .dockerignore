@@ -1,0 +1,4 @@
+# The image is built from cpp/ only. Everything else stays out of the build.
+*
+!cpp
+cpp/build

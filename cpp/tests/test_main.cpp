@@ -1,9 +1,12 @@
 // Unit tests, no framework: each TEST registers itself, main runs them all.
 // Build target: pf_tests. Exit code 0 means everything passed.
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <random>
 #include <string>
