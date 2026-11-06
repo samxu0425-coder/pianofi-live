@@ -219,6 +219,63 @@ docker run --rm --gpus all -v ${PWD}\models:/work/models -v ${PWD}\test_audio:/w
   (a cloud GPU), fix that column by hand, or the row is wrong.
 - Mic and loopback input do not work in the container: a server has no sound card.
 
+## 9. A spot GPU machine on AWS for tests (written, NOT yet applied)
+
+`infra/` is a Terraform script for one spot GPU machine (default `g4dn.xlarge`, one T4) in
+`us-east-1`. It is a test box: it does not touch the PianoFi cluster. It has never been applied or
+even validated, because there was no AWS account or Terraform on this PC when it was written.
+Do step 8 on this PC first, so the paid time is not spent on build errors.
+
+What it creates: the machine, a firewall rule that allows SSH from one address only, and an SSH key
+entry. The machine deletes itself `max_minutes` (default 120) after it starts, as a safety net.
+
+Needs: Terraform, the AWS CLI, and a login to the AWS account (Sam sets these up himself).
+
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\pianofi_live
+Copy-Item infra\terraform.tfvars.example infra\terraform.tfvars
+terraform -chdir=infra init
+terraform -chdir=infra plan
+terraform -chdir=infra apply
+```
+
+Put your public address in `infra\terraform.tfvars` before `init`. Read the `plan` output before
+`apply`: it must say 3 to add, 0 to change, 0 to destroy. `apply` prints the machine's address.
+
+Then copy the code, the model and one song up, build, run, and bring the result back
+(`<ip>` is the `public_ip` that `apply` printed):
+
+```powershell
+tar -czf runs\pf.tgz --exclude cpp/build Dockerfile .dockerignore cpp models
+ssh -i $HOME\.ssh\pianofi_live ec2-user@<ip> "mkdir -p pf/test_audio/16k pf/runs"
+scp -i $HOME\.ssh\pianofi_live runs\pf.tgz ec2-user@<ip>:pf/
+scp -i $HOME\.ssh\pianofi_live test_audio\16k\<song>.wav ec2-user@<ip>:pf/test_audio/16k/
+ssh -i $HOME\.ssh\pianofi_live ec2-user@<ip>
+```
+
+The `tar` line leaves out `cpp/build`, which is over 1 GB of Windows files. On the machine:
+
+```bash
+cd pf && tar -xzf pf.tgz && docker build -t pianofi-live .
+docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/<song>.wav --stride 16 --delay 16 --out runs/aws_s16
+```
+
+Back on this PC, fetch the run, score it, then delete the machine:
+
+```powershell
+scp -i $HOME\.ssh\pianofi_live -r ec2-user@<ip>:pf/runs/aws_s16 runs\
+.venv\Scripts\python.exe eval\score_engine.py runs\aws_s16 test_audio\16k\<song>.wav
+terraform -chdir=infra destroy
+```
+
+- Always finish with `destroy`, and check in the AWS console that no instance or volume is left.
+- `score_engine.py` writes this PC's name in the machine column. Change it by hand to the AWS
+  machine type for these rows.
+- If `apply` fails with a spot limit error (`MaxSpotInstanceCountExceeded`), the account's limit
+  "All G and VT Spot Instance Requests" is too low: one `g4dn.xlarge` needs 4 vCPUs of it. The
+  account owner said to request an increase in Service Quotas.
+- If it fails with no spot capacity, set `availability_zone` to another zone and apply again.
+
 ## Next steps (not built yet)
 
 - GPU-side h cache (IOBinding) so the 512-frame window isn't copied to the GPU every pass.

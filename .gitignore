@@ -8,6 +8,11 @@ cpp/build/
 # Separate git repo with the model code and weights
 amt-apc/
 
+# Terraform: downloaded providers, state (holds resource ids) and personal settings
+infra/.terraform/
+infra/*.tfstate*
+infra/terraform.tfvars
+
 # Generated or too large for git: py/export_onnx.py, py/prep_audio.py and the engine remake these
 models/
 runs/
