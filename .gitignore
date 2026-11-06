@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+
+# C++ build output
+cpp/build/
+
+# Separate git repo with the model code and weights
+amt-apc/
+
+# Generated or too large for git: py/export_onnx.py, py/prep_audio.py and the engine remake these
+models/
+runs/
+test_audio/

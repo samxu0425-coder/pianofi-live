@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PianoFi Live</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #14161b; color: #e6e8ec; font: 14px system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 10px 16px; }
+  h1 { font-size: 16px; margin: 0; }
+  button { font: inherit; padding: 6px 18px; border: 0; border-radius: 6px; background: #4c8dff; color: #fff; cursor: pointer; }
+  button:disabled { background: #3a3f4a; color: #9aa0ac; cursor: default; }
+  #lag { font-variant-numeric: tabular-nums; }
+  #status { color: #9aa0ac; }
+  #legend { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #9aa0ac; }
+  #legend i { width: 80px; height: 8px; border-radius: 4px;
+              background: linear-gradient(to right, hsl(220 80% 60%), hsl(110 80% 60%), hsl(0 80% 60%)); }
+  canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PianoFi Live</h1>
+  <button id="play">Play</button>
+  <span id="lag">lag: not measured yet</span>
+  <span id="status">Connecting...</span>
+  <span id="legend">quiet <i></i> loud</span>
+</header>
+<canvas id="roll"></canvas>
+<audio id="audio" src="/song.wav" preload="auto"></audio>
+
+<script>
+const LOW = 21, HIGH = 108;      // piano range, MIDI note numbers
+const KEYS_W = 56;               // width of the piano keys, px
+const WINDOW_SEC = 8;            // seconds of music across the roll
+const NOW_AT = 0.75;             // the "now" line sits this far across the roll
+const MIN_NOTE_SEC = 0.08;       // same filter as note2midi: shorter notes are dropped
+const BLACK = [1, 3, 6, 8, 10];  // pitch classes of the black keys
+
+const canvas = document.getElementById("roll");
+const ctx = canvas.getContext("2d");
+const audio = document.getElementById("audio");
+const playButton = document.getElementById("play");
+const lagText = document.getElementById("lag");
+const statusText = document.getElementById("status");
+
+let notes = [];     // {pitch, onset, vel, offset}; offset is null until the note ends
+let lags = [];      // t_wall - onset of the last 20 notes
+
+const ws = new WebSocket(`ws://${location.hostname}:${Number(location.port) + 1}`);
+ws.onopen = () => { statusText.textContent = "Ready"; };
+ws.onclose = () => { statusText.textContent = "Server stopped"; playButton.disabled = true; audio.pause(); };
+ws.onmessage = (message) => handleEvent(JSON.parse(message.data));
+
+// Browsers only allow sound after a click, so the click is what starts the engine.
+playButton.onclick = () => {
+  playButton.disabled = true;
+  statusText.textContent = "Loading the model...";
+  notes = [];
+  lags = [];
+  ws.send("play");
+};
+
+function handleEvent(e) {
+  if (e.type === "start") {
+    audio.currentTime = 0;
+    audio.play();
+    statusText.textContent = "Playing";
+  } else if (e.type === "on") {
+    notes.push({ pitch: e.pitch, onset: e.onset, vel: e.vel, offset: null });
+    lags.push(e.t_wall - e.onset);
+    if (lags.length > 20) lags.shift();
+    lagText.textContent = `lag: ${median(lags).toFixed(2)} s (median of last ${lags.length} notes)`;
+  } else if (e.type === "off") {
+    const index = notes.findIndex((n) => n.pitch === e.pitch && n.onset === e.onset);
+    if (index >= 0) {
+      if (e.offset - e.onset < MIN_NOTE_SEC) notes.splice(index, 1);
+      else notes[index].offset = e.offset;
+    }
+  } else if (e.type === "end") {
+    statusText.textContent = e.code === 0 ? "Finished" : `Engine failed (exit code ${e.code}), see the console`;
+    playButton.disabled = false;
+  }
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function draw() {
+  const scale = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (canvas.width !== Math.round(width * scale) || canvas.height !== Math.round(height * scale)) {
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+  }
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  const now = audio.currentTime;
+  const rollW = width - KEYS_W;
+  const rowH = height / (HIGH - LOW + 1);
+  const pxPerSec = rollW / WINDOW_SEC;
+  const nowX = KEYS_W + rollW * NOW_AT;
+  const xOf = (t) => nowX + (t - now) * pxPerSec;
+  const yOf = (pitch) => height - (pitch - LOW + 1) * rowH;
+  const isBlack = (pitch) => BLACK.includes(pitch % 12);
+
+  // Background rows, darker for black keys.
+  for (let pitch = LOW; pitch <= HIGH; pitch++) {
+    ctx.fillStyle = isBlack(pitch) ? "#181b21" : "#1f232b";
+    ctx.fillRect(KEYS_W, yOf(pitch), rollW, rowH);
+  }
+
+  // Notes. One still sounding is drawn up to the now line.
+  notes = notes.filter((n) => n.offset === null || xOf(n.offset) >= KEYS_W);
+  for (const n of notes) {
+    const x1 = xOf(n.onset), x2 = xOf(n.offset ?? now);
+    ctx.fillStyle = `hsl(${220 - 220 * n.vel / 127} 80% 60%)`;
+    ctx.fillRect(x1, yOf(n.pitch), Math.max(x2 - x1, 2), Math.max(rowH - 1, 1));
+  }
+
+  // Now line.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(nowX - 1, 0, 2, height);
+
+  // Piano keys, drawn last so they cover notes scrolling off the left.
+  for (let pitch = LOW; pitch <= HIGH; pitch++) {
+    ctx.fillStyle = isBlack(pitch) ? "#22252b" : "#eceef2";
+    ctx.fillRect(0, yOf(pitch), KEYS_W, Math.max(rowH - 1, 1));
+    if (pitch % 12 === 0 && rowH >= 6) {  // Label each C when there's room.
+      ctx.fillStyle = "#3a3f4a";
+      ctx.font = `${Math.min(rowH + 2, 11)}px system-ui`;
+      ctx.textBaseline = "middle";
+      ctx.fillText(`C${pitch / 12 - 1}`, KEYS_W - 22, yOf(pitch) + rowH / 2);
+    }
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
