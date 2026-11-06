@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["ui\\server.py", "test_audio\\16k\\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav"],
       "port": 8000
+    },
+    {
+      "name": "piano-roll-live",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["ui\\server.py", "--input", "loopback"],
+      "port": 8000
     }
   ]
 }

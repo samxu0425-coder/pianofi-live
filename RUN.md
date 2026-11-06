@@ -109,6 +109,34 @@ Open http://localhost:8000 and press Play. You hear the song and see its notes s
 The default is `--stride 16 --delay 16`. The button is there because browsers only allow sound after a click.
 Engine logs stay on this console. Ctrl+C quits.
 
+For whatever the PC is playing (Spotify, YouTube), or the mic:
+
+```powershell
+.venv\Scripts\python.exe ui\server.py --input loopback
+.venv\Scripts\python.exe ui\server.py --input mic
+```
+
+Press Play, then play your music. The page doesn't play anything itself here, and the button
+turns into Stop. Stop ends the engine at once, so that run's notes.csv is not written.
+
+### Live input (mic or system audio)
+
+```powershell
+cpp\build\Release\pianofi_live.exe --input loopback --stride 16 --delay 16
+cpp\build\Release\pianofi_live.exe --input mic --stride 16 --delay 16
+```
+
+`loopback` captures whatever the PC is playing (Spotify, YouTube) through WASAPI loopback, so no
+virtual cable is needed. `mic` uses the default microphone. Ctrl+C stops, or `--max-seconds X`.
+Set the CUDA PATH line from step 3 first: on the CPU the engine can't keep up.
+
+- Needs the lock-free ring buffer (the default build), because the audio callback must not lock.
+- Live audio is converted to 16 kHz mono by Windows and miniaudio, not by torchaudio like
+  `py\prep_audio.py`, so the samples differ slightly. F1 checks stay on file input.
+- The engine keeps every frame in memory, so memory grows with session length. Live input stops
+  after 1 hour unless `--max-seconds` says otherwise.
+- `cpp\third_party\miniaudio.h` is miniaudio v0.11.26 (public domain or MIT-0).
+
 ## 6. The lock-free ring buffer
 
 `cpp/include/pf/ring_buffer.h` has `MutexRingBuffer` and `SpscRingBuffer` (code in
@@ -124,5 +152,4 @@ cpp\build\Release\bench_ring.exe
 
 ## Next steps (not built yet)
 
-- Live input: miniaudio capture (mic, or WASAPI loopback for system audio) feeding the same ring buffer.
 - GPU-side h cache (IOBinding) so the 512-frame window isn't copied to the GPU every pass.

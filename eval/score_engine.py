@@ -8,7 +8,8 @@ Reports:
   - accuracy: C++ notes.csv vs Pipeline.wav2midi notes (mir_eval note F1,
     50 ms onsets, offsets ignored; same as py/stream_sim.py)
   - decoder check: Pipeline.mpe2note on the dumped arrays vs notes.csv
-    (must match: the C++ decoder is a port of it)
+    (must match: the C++ decoder is a port of it). Times may differ by 1e-5 s,
+    or by one float32 step for notes past 128 s, where that step is larger.
   - array check: at stride 512 with heads b, the dumped arrays must match batch
 And appends one row to results.md.
 """
@@ -67,9 +68,15 @@ def same_notes(a: list[dict], b: list[dict], tol: float = 1e-5) -> bool:
     # Python and C++ round their onset times differently.
     key = lambda n: (n["pitch"], n["onset"])
     a, b = sorted(a, key=key), sorted(b, key=key)
+
+    # mpe2note keeps note times as float32, and past 128 s one float32 step is
+    # bigger than tol (1.5e-5 s). Allow one step there; before that, tol decides.
+    def close(s: float, t: float) -> bool:
+        return abs(s - t) <= max(tol, float(np.spacing(np.float32(max(s, t)))))
+
     return all(
         x["pitch"] == y["pitch"] and x["velocity"] == y["velocity"]
-        and abs(x["onset"] - y["onset"]) < tol and abs(x["offset"] - y["offset"]) < tol
+        and close(x["onset"], y["onset"]) and close(x["offset"], y["offset"])
         for x, y in zip(a, b)
     )
 

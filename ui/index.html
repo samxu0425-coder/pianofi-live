@@ -28,7 +28,7 @@
   <span id="legend">quiet <i></i> loud</span>
 </header>
 <canvas id="roll"></canvas>
-<audio id="audio" src="/song.wav" preload="auto"></audio>
+<audio id="audio" preload="auto"></audio>
 
 <script>
 const LOW = 21, HIGH = 108;      // piano range, MIDI note numbers
@@ -47,6 +47,9 @@ const statusText = document.getElementById("status");
 
 let notes = [];     // {pitch, onset, vel, offset}; offset is null until the note ends
 let lags = [];      // t_wall - onset of the last 20 notes
+let input = "file"; // "file", "loopback" or "mic": the server says which
+let running = false;
+let wallOrigin = null;  // page time (s) at which the engine's t_wall was 0
 
 const ws = new WebSocket(`ws://${location.hostname}:${Number(location.port) + 1}`);
 ws.onopen = () => { statusText.textContent = "Ready"; };
@@ -55,18 +58,47 @@ ws.onmessage = (message) => handleEvent(JSON.parse(message.data));
 
 // Browsers only allow sound after a click, so the click is what starts the engine.
 playButton.onclick = () => {
-  playButton.disabled = true;
-  statusText.textContent = "Loading the model...";
+  if (running) {  // only possible with live input, where the button turns into Stop
+    ws.send("stop");
+    return;
+  }
+  running = true;
+  wallOrigin = null;
   notes = [];
   lags = [];
+  statusText.textContent = "Loading the model...";
+  updateButton();
   ws.send("play");
 };
 
+function updateButton() {
+  const live = input !== "file";
+  playButton.textContent = running && live ? "Stop" : "Play";
+  playButton.disabled = running && !live;  // a file just plays to its end
+}
+
+// Song time at the "now" line. A file: where the audio is. Live: seconds since the engine started.
+function songTime() {
+  if (input === "file") return audio.currentTime;
+  return wallOrigin === null ? 0 : performance.now() / 1000 - wallOrigin;
+}
+
 function handleEvent(e) {
-  if (e.type === "start") {
-    audio.currentTime = 0;
-    audio.play();
-    statusText.textContent = "Playing";
+  // Line the page's clock up with the engine's: t_wall is seconds since the engine started.
+  if (wallOrigin === null && e.t_wall !== undefined) wallOrigin = performance.now() / 1000 - e.t_wall;
+
+  if (e.type === "mode") {
+    input = e.input;
+    running = e.running;
+    if (input === "file") audio.src = "/song.wav";
+    if (running) statusText.textContent = "Running";
+    updateButton();
+  } else if (e.type === "start") {
+    if (input === "file") {
+      audio.currentTime = 0;
+      audio.play();
+    }
+    statusText.textContent = { file: "Playing", loopback: "Listening to this PC's audio", mic: "Listening to the mic" }[input];
   } else if (e.type === "on") {
     notes.push({ pitch: e.pitch, onset: e.onset, vel: e.vel, offset: null });
     lags.push(e.t_wall - e.onset);
@@ -79,8 +111,12 @@ function handleEvent(e) {
       else notes[index].offset = e.offset;
     }
   } else if (e.type === "end") {
-    statusText.textContent = e.code === 0 ? "Finished" : `Engine failed (exit code ${e.code}), see the console`;
-    playButton.disabled = false;
+    const now = songTime();
+    for (const n of notes) if (n.offset === null) n.offset = now;  // a stopped engine sends no more "off" events
+    statusText.textContent = e.stopped ? "Stopped" : e.code === 0 ? "Finished"
+      : `Engine failed (exit code ${e.code}), see the console`;
+    running = false;
+    updateButton();
   }
 }
 
@@ -98,7 +134,7 @@ function draw() {
   }
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  const now = audio.currentTime;
+  const now = songTime();
   const rollW = width - KEYS_W;
   const rowH = height / (HIGH - LOW + 1);
   const pxPerSec = rollW / WINDOW_SEC;

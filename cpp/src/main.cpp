@@ -1,8 +1,10 @@
 // pianofi_live: run the streaming engine on a 16 kHz wav and report metrics.
 //
 //   pianofi_live --wav test_audio\song_16k.wav [options]
+//   pianofi_live --input mic|loopback [options]        Ctrl+C stops
 //
-//   --models DIR      folder with frame.onnx, time.onnx, sv_<style>.bin (default: models)
+//   --input KIND      file (default), mic, or loopback (what the PC is playing)
+//   --models DIR     folder with frame.onnx, time.onnx, sv_<style>.bin (default: models)
 //   --style NAME      style vector file sv_NAME.bin (default: level2)
 //   --stride N        output frames per pass, 16 ms each (default: 32 = 0.512 s)
 //   --delay N         emit output N frames back from the newest; adds N*16 ms lag (default: 0)
@@ -14,9 +16,11 @@
 //   --threads N       ONNX Runtime intra-op threads
 //   --out DIR         where notes.csv and metrics.json go (default: runs/<timestamp>)
 //   --dump            also write raw model outputs + mel to --out for the Python checks
-//   --max-seconds X   only use the first X seconds of the wav
+//   --max-seconds X   only use the first X seconds of the wav; live input stops after X (default 3600)
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -104,9 +108,12 @@ std::string json_escape(const std::string& s) {
     return out;
 }
 
+std::atomic<bool> g_stop{false};
+void on_ctrl_c(int) { g_stop.store(true); }
+
 int usage() {
     std::fprintf(stderr,
-                 "usage: pianofi_live --wav FILE [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
+                 "usage: pianofi_live (--wav FILE | --input mic|loopback) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
                  "                    [--no-cache] [--fast] [--events] [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X]\n");
     return 2;
 }
@@ -117,7 +124,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     timeBeginPeriod(1);  // 1 ms sleep granularity instead of ~15 ms
 #endif
-    std::string wav_path, models = "models", style = "level2", out_dir;
+    std::string wav_path, input_name = "file", models = "models", style = "level2", out_dir;
     pf::EngineConfig cfg;
     pf::ModelOptions mopt;
     bool try_cuda = true, dump = false;
@@ -130,6 +137,7 @@ int main(int argc, char** argv) {
         };
         try {
             if (a == "--wav") wav_path = next();
+            else if (a == "--input") input_name = next();
             else if (a == "--models") models = next();
             else if (a == "--style") style = next();
             else if (a == "--stride") cfg.stride = std::stoi(next());
@@ -149,7 +157,16 @@ int main(int argc, char** argv) {
             return usage();
         }
     }
-    if (wav_path.empty()) return usage();
+    if (input_name == "mic") cfg.input = pf::Input::Mic;
+    else if (input_name == "loopback") cfg.input = pf::Input::Loopback;
+    else if (input_name != "file") return usage();
+    const bool live = cfg.input != pf::Input::File;
+    if (live != wav_path.empty()) return usage();  // exactly one of a wav file or a live input
+    if (live) {
+        if (max_seconds > 0) cfg.max_seconds = max_seconds;
+        cfg.stop = &g_stop;
+        std::signal(SIGINT, on_ctrl_c);  // finish cleanly, so notes and metrics get written
+    }
     if (out_dir.empty()) out_dir = "runs/" + timestamp();
     FILE* log = cfg.events ? stderr : stdout;  // with --events, stdout is only JSON
 
@@ -157,13 +174,16 @@ int main(int argc, char** argv) {
         fs::create_directories(out_dir);
         if (dump) cfg.dump_dir = out_dir;
 
-        pf::Wav wav = pf::read_wav(wav_path);
-        if (wav.sample_rate != 16000) {
-            std::fprintf(stderr, "%s is %d Hz. Convert it first: python py/prep_audio.py %s\n", wav_path.c_str(),
-                         wav.sample_rate, wav_path.c_str());
-            return 1;
+        pf::Wav wav;
+        if (!live) {
+            wav = pf::read_wav(wav_path);
+            if (wav.sample_rate != 16000) {
+                std::fprintf(stderr, "%s is %d Hz. Convert it first: python py/prep_audio.py %s\n", wav_path.c_str(),
+                             wav.sample_rate, wav_path.c_str());
+                return 1;
+            }
+            if (max_seconds > 0 && wav.mono.size() > size_t(max_seconds * 16000)) wav.mono.resize(size_t(max_seconds * 16000));
         }
-        if (max_seconds > 0 && wav.mono.size() > size_t(max_seconds * 16000)) wav.mono.resize(size_t(max_seconds * 16000));
         const auto sv = read_floats(models + "/sv_" + style + ".bin", pf::kStyleDim);
 
         mopt.frame_path = models + "/frame.onnx";
@@ -183,13 +203,16 @@ int main(int argc, char** argv) {
         }
 
         std::fprintf(log, "%s: %.1f s, provider %s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s\n",
-                     wav_path.c_str(), double(wav.mono.size()) / 16000, model->provider(), cfg.stride, cfg.stride * 16.0,
+                     live ? input_name.c_str() : wav_path.c_str(), live ? cfg.max_seconds : double(wav.mono.size()) / 16000,
+                     model->provider(), cfg.stride, cfg.stride * 16.0,
                      cfg.delay, cfg.delay * 16.0, cfg.heads, cfg.cache ? "cached" : "no cache",
                      cfg.realtime ? "real time" : "fast");
 
         // Warm-up: the first ONNX Runtime run (especially on CUDA) is slow.
         {
             pf::EngineConfig warm = cfg;
+            warm.input = pf::Input::File;
+            warm.stop = nullptr;
             warm.realtime = false;
             warm.events = false;
             warm.dump_dir.clear();
@@ -216,6 +239,8 @@ int main(int argc, char** argv) {
             std::ofstream f(out_dir + "/metrics.json");
             f << "{\n";
             f << "  \"command\": \"" << json_escape(command_line(argc, argv)) << "\",\n";
+            f << "  \"input\": \"" << input_name << "\",\n";
+            f << "  \"capture_device\": \"" << json_escape(mx.capture_device) << "\",\n";
             f << "  \"wav\": \"" << fs::path(wav_path).filename().string() << "\",\n";
             f << "  \"provider\": \"" << mx.provider << "\",\n";
             f << "  \"stride_frames\": " << mx.stride << ",\n";

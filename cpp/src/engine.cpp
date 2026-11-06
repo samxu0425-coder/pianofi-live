@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <thread>
 
+#include "pf/capture.h"
 #include "pf/mel.h"
 #include "pf/ring_buffer.h"
 
@@ -33,6 +34,30 @@ void write_raw(const std::string& path, const std::vector<T>& v) {
     f.write(reinterpret_cast<const char*>(v.data()), std::streamsize(v.size() * sizeof(T)));
 }
 
+// What the audio callback needs. Everything is allocated before capture starts.
+struct LiveAudio {
+    AudioRingBuffer* ring;
+    std::atomic<long long>* block_ns;  // arrival time of each block, for the lag numbers
+    size_t n_blocks;
+    size_t block;
+    Clock::time_point t0;
+    std::atomic<size_t>* overruns;
+    std::atomic<size_t> samples_seen{0};
+};
+
+// The audio thread: no allocation, no locks, no I/O, no logging.
+void on_live_audio(const float* samples, size_t n, void* user) {
+    if (n == 0) return;
+    auto& live = *static_cast<LiveAudio*>(user);
+    const size_t seen = live.samples_seen.load(std::memory_order_relaxed);
+    const long long now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - live.t0).count();
+    const size_t last_block = std::min((seen + n - 1) / live.block, live.n_blocks - 1);
+    for (size_t b = seen / live.block; b <= last_block; ++b) live.block_ns[b].store(now_ns, std::memory_order_relaxed);
+    const size_t done = live.ring->push(samples, n);
+    if (done < n) live.overruns->fetch_add(n - done, std::memory_order_relaxed);
+    live.samples_seen.store(seen + n, std::memory_order_relaxed);
+}
+
 }  // namespace
 
 Engine::Engine(Model& model, const std::vector<float>& sv, const EngineConfig& cfg)
@@ -42,6 +67,13 @@ Engine::Engine(Model& model, const std::vector<float>& sv, const EngineConfig& c
     if (cfg_.heads != 'a' && cfg_.heads != 'b') throw std::invalid_argument("heads must be a or b");
     if (cfg_.delay < 0 || cfg_.stride + cfg_.delay > kWindow) throw std::invalid_argument("stride + delay must be 1..512 frames");
     if (cfg_.delay > 0 && cfg_.heads != 'b') throw std::invalid_argument("delay needs the time model (heads b)");
+    if (cfg_.input != Input::File) {
+        if (!cfg_.realtime) throw std::invalid_argument("live input can't run with --fast");
+        if (cfg_.max_seconds <= 0) throw std::invalid_argument("max_seconds must be positive");
+#ifndef PF_USE_SPSC
+        throw std::invalid_argument("live input needs the lock-free ring buffer: build with -DPF_USE_SPSC=ON");
+#endif
+    }
 }
 
 std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
@@ -49,6 +81,8 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     const int D = cfg_.delay;
     const bool use_b = cfg_.heads == 'b';
     const bool cache = cfg_.cache || !use_b;  // A heads never need the window
+    const bool live = cfg_.input != Input::File;
+    const size_t total_samples = live ? size_t(cfg_.max_seconds * kSr) : samples.size();  // most we can see
     mx = Metrics{};
     mx.provider = model_.provider();
     mx.stride = S;
@@ -56,17 +90,24 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     mx.heads = cfg_.heads;
     mx.cache = cache;
     mx.realtime = cfg_.realtime;
-    mx.audio_sec = double(samples.size()) / kSr;
+    mx.audio_sec = double(total_samples) / kSr;
 
     // ---------------------------------------------------------------- buffers
     // All allocation happens here, before the audio thread starts.
     AudioRingBuffer ring(cfg_.ring_capacity);
-    const size_t n_blocks = (samples.size() + cfg_.block - 1) / cfg_.block;
+    const size_t n_blocks = (total_samples + cfg_.block - 1) / cfg_.block;
     std::unique_ptr<std::atomic<long long>[]> block_ns(new std::atomic<long long>[n_blocks + 1]);
     for (size_t b = 0; b <= n_blocks; ++b) block_ns[b].store(-1, std::memory_order_relaxed);
     std::vector<double> jitter(n_blocks, 0.0);
     std::atomic<bool> producer_done{false};
     std::atomic<size_t> overruns{0};
+    LiveAudio live_audio{&ring, block_ns.get(), n_blocks, size_t(cfg_.block), {}, &overruns};
+    std::unique_ptr<Capture> capture;
+    if (live) {
+        capture = std::make_unique<Capture>(cfg_.input == Input::Loopback, on_live_audio, &live_audio);
+        mx.capture_device = capture->description();
+        std::fprintf(stderr, "Capturing from %s\n", mx.capture_device.c_str());
+    }
 
     // Mirrored h cache: frame t lives in slots t%512 and t%512 + 512, so any
     // 512 consecutive frames are contiguous and go to the time model with no copy.
@@ -115,7 +156,7 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     bool eof = false;
     const auto t0 = Clock::now();
     auto arrival_ms = [&](long long sample) -> double {
-        if (sample < 0 || size_t(sample) >= samples.size()) return -1;
+        if (sample < 0 || size_t(sample) >= total_samples) return -1;
         const long long ns = block_ns[size_t(sample) / cfg_.block].load(std::memory_order_relaxed);
         return ns < 0 ? -1 : ns / 1e6;
     };
@@ -169,7 +210,11 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     }
 
     // ----------------------------------------------------------- audio thread
-    std::thread producer([&] {
+    // Live input: the sound card calls on_live_audio. File input: this thread acts like one.
+    live_audio.t0 = t0;
+    if (live) capture->start();
+    std::thread producer;
+    if (!live) producer = std::thread([&] {
         const double block_sec = double(cfg_.block) / kSr;
         for (size_t b = 0; b < n_blocks; ++b) {
             const size_t lo = b * cfg_.block;
@@ -204,6 +249,13 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     long long k = 0;           // next pass
 
     while (true) {
+        if (live && !producer_done.load(std::memory_order_relaxed)) {
+            const bool asked = cfg_.stop && cfg_.stop->load(std::memory_order_relaxed);
+            if (asked || ms_since(t0, Clock::now()) >= cfg_.max_seconds * 1000.0) {
+                capture->stop();
+                producer_done.store(true, std::memory_order_release);
+            }
+        }
         size_t got = ring.pop(pop_buf.data(), pop_buf.size());
         if (got > 0) {
             mel.push(pop_buf.data(), got);
@@ -269,14 +321,15 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
         if (eof && k * S >= n_output) break;
         if (got == 0 && !ran) std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
-    producer.join();
+    if (producer.joinable()) producer.join();
     decoder.finish();
 
+    if (live) mx.audio_sec = double(live_audio.samples_seen.load()) / kSr;
     mx.wall_sec = ms_since(t0, Clock::now()) / 1000.0;
     mx.passes = size_t(k);
     for (double v : mx.pass_ms) mx.compute_sec += v / 1000.0;
     mx.overrun_samples = overruns.load();
-    if (cfg_.realtime) mx.push_jitter_ms = jitter;
+    if (cfg_.realtime && !live) mx.push_jitter_ms = jitter;
 
     if (!cfg_.dump_dir.empty()) {
         write_raw(cfg_.dump_dir + "/onset.f32", d_on);

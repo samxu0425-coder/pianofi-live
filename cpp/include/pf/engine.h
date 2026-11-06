@@ -10,6 +10,7 @@
 // a real audio callback.
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,12 @@
 
 namespace pf {
 
+enum class Input { File, Mic, Loopback };
+
 struct EngineConfig {
+    Input input = Input::File;
+    double max_seconds = 3600;    // live input stops after this long
+    const std::atomic<bool>* stop = nullptr;  // live input stops when this turns true
     int stride = 32;              // output frames per pass (16 ms each)
     int delay = 0;                // emit output this many frames back from the newest (B heads only)
     char heads = 'b';             // 'b': time model (what batch uses), 'a': per-frame heads only
@@ -32,6 +38,7 @@ struct EngineConfig {
 
 struct Metrics {
     std::string provider;
+    std::string capture_device;  // live input only
     int stride = 0;
     int delay = 0;
     char heads = 'b';
@@ -52,7 +59,7 @@ struct Metrics {
 class Engine {
 public:
     Engine(Model& model, const std::vector<float>& sv, const EngineConfig& cfg);
-    // samples: 16 kHz mono. Returns final notes; fills metrics.
+    // samples: 16 kHz mono, ignored for live input. Returns final notes; fills metrics.
     std::vector<Note> run(const std::vector<float>& samples, Metrics& metrics);
 
 private:

@@ -91,6 +91,8 @@ F1 vs batch notes (50 ms onsets, offsets ignored). Lag = time from audio arrivin
 | 2026-11-06 02:01 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 63.2 | 75.6 | 1013 | 1144 | 0.267 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs\delay-s16-d16-rt` |
 | 2026-11-06 02:11 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 187.8 | 284.8 | not measured | not measured | 0.025 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
 | 2026-11-06 02:12 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 62.2 | 77.4 | 1013 | 1144 | 0.261 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs\spsc-s16-d16-rt` |
+| 2026-11-06 02:22 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 188.7 | 289.4 | not measured | not measured | 0.025 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
+| 2026-11-06 02:42 | prettifun - Light (Instrumental) - swagdisease (128k).wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.8421 | 0.9192 | 0.8790 | 54.9 | 73.0 | not measured | not measured | 0.221 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav "test_audio\16k\prettifun - Light (Instrumental) - swagdisease (128k).wav" --stride 16 --delay 16 --fast --dump --out runs\prettifun-s16-d16` |
 
 ## Ring buffer benchmark, 2026-11-06
 
@@ -168,3 +170,27 @@ Style level2, seed 0, device cuda, 14 torch threads. Reference: Pipeline.wav2mid
 | 0.512 s | 1024 | 2112 | 0.9392 | 0.9668 | 0.9528 | 168 | 158.2 |
 | 0.512 s | 2048 | 3136 | 0.9432 | 0.9596 | 0.9512 | 168 | 156.1 |
 | 8.192 s | 0 | 8768 | 1.0000 | 1.0000 | 1.0000 | 10.5 | 159.2 |
+
+## Live input, 2026-11-06 02:23
+
+Command, run while `test_audio\686610__seth_makes_sounds__bubbglegum-pop-song.wav` was playing on the PC: `cpp\build\Release\pianofi_live.exe --input loopback --stride 16 --delay 16 --max-seconds 60 --out runs\live-loopback`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10. Device: Speakers (Realtek(R) Audio), WASAPI loopback. CUDA, lock-free ring buffer.
+
+| input | seconds | passes | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | overruns | notes |
+|---|---|---|---|---|---|---|---|---|
+| loopback | 60.0 | 256 | 62.7 | 78.0 | 1011 | 1143 | 0 | 741 |
+
+F1 vs batch: not measured. A live capture has no fixed start time, so it can't be scored like a file.
+
+## Live input, 2026-11-06 02:32
+
+Command, run while `prettifun - Light (Instrumental) - swagdisease (128k).wav` (48 kHz original) was playing on the PC: `cpp\build\Release\pianofi_live.exe --input loopback --stride 16 --delay 16 --max-seconds 60 --out runs\live-loopback-prettifun`
+
+Same machine and device as above. Windows master volume was 65% (read about 10 minutes later). The capture is quieter than the file and the engine finds fewer notes at lower volume, so the note count depends on the PC's volume.
+
+| input | seconds | passes | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | overruns | notes |
+|---|---|---|---|---|---|---|---|---|
+| loopback | 60.0 | 256 | 59.0 | 76.9 | 1012 | 1144 | 0 | 120 |
+
+F1 vs batch: not measured, for the same reason.
