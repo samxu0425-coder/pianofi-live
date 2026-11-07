@@ -24,10 +24,12 @@ SQL = ROOT / "eval" / "sql"
 STAGES = ("pass_ms", "frame_model_ms", "time_model_ms", "decode_ms", "frame_lag_ms", "note_lag_ms", "push_jitter_ms", "gain")
 
 
-def connect(path: Path = DB) -> sqlite3.Connection:
+def connect(path: Path = DB, write: bool = False) -> sqlite3.Connection:
+    """Writers apply schema.sql (creates tables, recreates the view); readers leave the file untouched."""
     con = sqlite3.connect(path)
     con.execute("PRAGMA foreign_keys = ON")
-    con.executescript((SQL / "schema.sql").read_text(encoding="utf-8"))
+    if write:
+        con.executescript((SQL / "schema.sql").read_text(encoding="utf-8"))
     return con
 
 
@@ -77,7 +79,7 @@ def add_score(con: sqlite3.Connection, run_id: int, scored_at: str, p: float, r:
 def record(run: Path, metrics: dict, machine: str, p: float, r: float, f: float,
            engine_notes: int, batch_notes: int, decoder_ok: bool, array_ok: bool | None) -> None:
     """Called by score_engine.py: store the run and this score."""
-    with connect() as con:
+    with connect(write=True) as con:
         run_id = upsert_run(con, run.name, metrics, machine, read_gpu_mb(run))
         add_score(con, run_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), p, r, f,
                   engine_notes, batch_notes, decoder_ok, array_ok, "score_engine")
@@ -162,7 +164,7 @@ def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 2
-    with connect() as con:
+    with connect(write=argv[0] == "import") as con:
         if argv[0] == "import":
             import_all(con)
         elif argv[0] == "report":

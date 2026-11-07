@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -50,11 +51,28 @@ class Files(BaseHTTPRequestHandler):
             return
         path, content_type = self.files[self.path]
         data = path.read_bytes()
-        self.send_response(200)
+        # Browsers can only seek in audio served with byte ranges (used when the page
+        # jumps the song forward to where the engine is).
+        start, end = 0, len(data) - 1
+        status = 200
+        if match := re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "")):
+            status = 206
+            if match[1]:
+                start, end = int(match[1]), int(match[2]) if match[2] else end
+            else:  # "bytes=-N": the last N bytes
+                start = max(len(data) - int(match[2]), 0)
+            end = min(end, len(data) - 1)
+            if start > end:
+                self.send_error(416)
+                return
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data[start:end + 1])
 
     def log_message(self, *args):
         pass  # Keep the console for the engine's logs.

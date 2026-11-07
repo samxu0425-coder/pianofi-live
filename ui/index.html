@@ -11,28 +11,36 @@
   h1 { font-size: 16px; margin: 0; }
   button { font: inherit; padding: 6px 18px; border: 0; border-radius: 6px; background: #4c8dff; color: #fff; cursor: pointer; }
   button:disabled { background: #3a3f4a; color: #9aa0ac; cursor: default; }
-  #lag { font-variant-numeric: tabular-nums; }
-  #status { color: #9aa0ac; }
+  button.quiet { background: #2b3039; }
+  #lag, #view { font-variant-numeric: tabular-nums; }
+  #status, #view { color: #9aa0ac; }
   #legend { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #9aa0ac; }
   #legend i { width: 80px; height: 8px; border-radius: 4px;
               background: linear-gradient(to right, hsl(220 80% 60%), hsl(110 80% 60%), hsl(0 80% 60%)); }
-  canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+  #help { padding: 0 16px 6px; color: #5f6675; font-size: 12px; }
+  canvas { flex: 1; min-height: 0; width: 100%; display: block; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
 </style>
 </head>
 <body>
 <header>
   <h1>PianoFi Live</h1>
   <button id="play">Play</button>
+  <button id="pause" class="quiet" disabled>Pause</button>
+  <button id="live" class="quiet" hidden>Back to live</button>
   <span id="lag">lag: not measured yet</span>
+  <span id="view"></span>
   <span id="status">Connecting...</span>
   <span id="legend">quiet <i></i> loud</span>
 </header>
+<div id="help">Scroll or drag the roll to look back at earlier notes. Space pauses the view, Home jumps back to live.</div>
 <canvas id="roll"></canvas>
 <audio id="audio" preload="auto"></audio>
 
 <script>
 const LOW = 21, HIGH = 108;      // piano range, MIDI note numbers
 const KEYS_W = 56;               // width of the piano keys, px
+const AXIS_H = 18;               // height of the time axis at the bottom, px
 const WINDOW_SEC = 8;            // seconds of music across the roll
 const NOW_AT = 0.75;             // the "now" line sits this far across the roll
 const MIN_NOTE_SEC = 0.08;       // same filter as note2midi: shorter notes are dropped
@@ -42,14 +50,25 @@ const canvas = document.getElementById("roll");
 const ctx = canvas.getContext("2d");
 const audio = document.getElementById("audio");
 const playButton = document.getElementById("play");
+const pauseButton = document.getElementById("pause");
+const liveButton = document.getElementById("live");
 const lagText = document.getElementById("lag");
+const viewText = document.getElementById("view");
 const statusText = document.getElementById("status");
 
-let notes = [];     // {pitch, onset, vel, offset}; offset is null until the note ends
+let notes = [];     // {pitch, onset, vel, offset}; offset is null until the note ends. All of them are kept.
 let lags = [];      // t_wall - onset of the last 20 notes
 let input = "file"; // "file", "loopback" or "mic": the server says which
 let running = false;
 let wallOrigin = null;  // page time (s) at which the engine's t_wall was 0
+
+// The view: what song time the "now" line shows. Normally it follows the music.
+// Pausing freezes it (and the song, for a file); scrolling moves it back by `behind` seconds.
+// The engine itself is never paused: with live input the music carries on, so notes
+// keep arriving and are there to scroll through.
+let paused = false;
+let pausedAt = 0;   // song time when the view was paused
+let behind = 0;     // how far the view is behind the music, seconds
 
 const ws = new WebSocket(`ws://${location.hostname}:${Number(location.port) + 1}`);
 ws.onopen = () => { statusText.textContent = "Ready"; };
@@ -68,21 +87,98 @@ playButton.onclick = () => {
   wallOrigin = null;
   notes = [];
   lags = [];
+  setPaused(false);
+  behind = 0;
   statusText.textContent = "Loading the model...";
-  updateButton();
+  updateButtons();
   ws.send("play");
 };
+pauseButton.onclick = () => setPaused(!paused);
+liveButton.onclick = goLive;
 
-function updateButton() {
+function goLive() {
+  behind = 0;
+  // The engine plays a file at real-time pace whether or not the song is paused here,
+  // so "live" is where the engine is: skip the song forward to it.
+  if (input === "file" && running) seekSong(engineTime());
+  setPaused(false);
+  updateButtons();
+}
+
+function seekSong(seconds) {
+  // A seek before the song's metadata has loaded is ignored by the browser, so wait for it.
+  if (audio.readyState >= 1) audio.currentTime = seconds;
+  else audio.addEventListener("loadedmetadata", () => { audio.currentTime = seconds; }, { once: true });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !pauseButton.disabled) { e.preventDefault(); setPaused(!paused); }
+  if (e.code === "Home") goLive();
+  if (e.code === "ArrowLeft") scrollBy(1);
+  if (e.code === "ArrowRight") scrollBy(-1);
+});
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  scrollBy(delta / 100);  // 100 wheel units = 1 second
+}, { passive: false });
+
+// Drag the roll sideways to scroll it.
+let drag = null;
+canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, behind }; canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const pxPerSec = (canvas.clientWidth - KEYS_W) / WINDOW_SEC;
+  setBehind(drag.behind + (e.clientX - drag.x) / pxPerSec);
+});
+canvas.addEventListener("pointerup", () => { drag = null; canvas.classList.remove("dragging"); });
+canvas.addEventListener("pointercancel", () => { drag = null; canvas.classList.remove("dragging"); });
+
+function scrollBy(seconds) { setBehind(behind + seconds); }
+
+function setBehind(seconds) {
+  // Can't look before the start of the music, or ahead of it.
+  behind = Math.min(Math.max(seconds, 0), musicTime());
+  updateButtons();
+}
+
+function setPaused(on) {
+  if (on === paused) return;
+  paused = on;
+  if (on) {
+    pausedAt = musicTime();
+    if (input === "file") audio.pause();
+  } else if (input === "file" && running) {
+    audio.play();
+  }
+  updateButtons();
+}
+
+function updateButtons() {
   const live = input !== "file";
   playButton.textContent = running && live ? "Stop" : "Play";
   playButton.disabled = running && !live;  // a file just plays to its end
+  pauseButton.disabled = !running && !paused;
+  pauseButton.textContent = paused ? "Resume" : "Pause";
+  liveButton.hidden = behind < 0.05 && !paused;
 }
 
-// Song time at the "now" line. A file: where the audio is. Live: seconds since the engine started.
-function songTime() {
+// Song time of the music itself. A file: where the audio is. Live: seconds since the engine started.
+function musicTime() {
   if (input === "file") return audio.currentTime;
   return wallOrigin === null ? 0 : performance.now() / 1000 - wallOrigin;
+}
+
+// Song time the engine has reached: it runs at real-time pace from its start.
+function engineTime() {
+  if (wallOrigin === null) return 0;
+  const elapsed = performance.now() / 1000 - wallOrigin;
+  return input === "file" && audio.duration ? Math.min(elapsed, audio.duration) : elapsed;
+}
+
+// Song time at the "now" line of the roll.
+function viewTime() {
+  return (paused ? pausedAt : musicTime()) - behind;
 }
 
 function handleEvent(e) {
@@ -94,7 +190,7 @@ function handleEvent(e) {
     running = e.running;
     if (input === "file") audio.src = "/song.wav";
     if (running) statusText.textContent = "Running";
-    updateButton();
+    updateButtons();
   } else if (e.type === "start") {
     if (input === "file") {
       audio.currentTime = 0;
@@ -107,7 +203,9 @@ function handleEvent(e) {
     if (lags.length > 20) lags.shift();
     lagText.textContent = `lag: ${median(lags).toFixed(2)} s (median of last ${lags.length} notes)`;
   } else if (e.type === "off") {
-    const index = notes.findIndex((n) => n.pitch === e.pitch && n.onset === e.onset);
+    // Sounding notes are recent, so search from the end.
+    let index = notes.length - 1;
+    while (index >= 0 && !(notes[index].pitch === e.pitch && notes[index].onset === e.onset)) index--;
     if (index >= 0) {
       if (e.offset - e.onset < MIN_NOTE_SEC) notes.splice(index, 1);
       else notes[index].offset = e.offset;
@@ -115,18 +213,23 @@ function handleEvent(e) {
   } else if (e.type === "warning") {
     statusText.textContent = e.text;
   } else if (e.type === "end") {
-    const now = songTime();
+    const now = musicTime();
     for (const n of notes) if (n.offset === null) n.offset = now;  // a stopped engine sends no more "off" events
     statusText.textContent = e.stopped ? "Stopped" : e.code === 0 ? "Finished"
       : `Engine failed (exit code ${e.code}), see the console`;
     running = false;
-    updateButton();
+    updateButtons();
   }
 }
 
 function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
+}
+
+function clock(seconds) {
+  const m = Math.floor(seconds / 60), s = seconds - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }
 
 function draw() {
@@ -137,14 +240,17 @@ function draw() {
     canvas.height = Math.round(height * scale);
   }
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, width, height);
 
-  const now = songTime();
+  const music = musicTime();
+  const now = viewTime();
   const rollW = width - KEYS_W;
-  const rowH = height / (HIGH - LOW + 1);
+  const rollH = height - AXIS_H;
+  const rowH = rollH / (HIGH - LOW + 1);
   const pxPerSec = rollW / WINDOW_SEC;
   const nowX = KEYS_W + rollW * NOW_AT;
   const xOf = (t) => nowX + (t - now) * pxPerSec;
-  const yOf = (pitch) => height - (pitch - LOW + 1) * rowH;
+  const yOf = (pitch) => rollH - (pitch - LOW + 1) * rowH;
   const isBlack = (pitch) => BLACK.includes(pitch % 12);
 
   // Background rows, darker for black keys.
@@ -153,17 +259,39 @@ function draw() {
     ctx.fillRect(KEYS_W, yOf(pitch), rollW, rowH);
   }
 
-  // Notes. One still sounding is drawn up to the now line.
-  notes = notes.filter((n) => n.offset === null || xOf(n.offset) >= KEYS_W);
+  // Notes in view. One still sounding is drawn up to the music's current time.
   for (const n of notes) {
-    const x1 = xOf(n.onset), x2 = xOf(n.offset ?? now);
+    const x1 = xOf(n.onset), x2 = xOf(n.offset ?? music);
+    if (x2 < KEYS_W || x1 > width) continue;
     ctx.fillStyle = `hsl(${220 - 220 * n.vel / 127} 80% 60%)`;
     ctx.fillRect(x1, yOf(n.pitch), Math.max(x2 - x1, 2), Math.max(rowH - 1, 1));
   }
 
-  // Now line.
+  // Time axis: a tick every second, a label every 2.
+  ctx.fillStyle = "#1a1d23";
+  ctx.fillRect(KEYS_W, rollH, rollW, AXIS_H);
+  ctx.font = "11px system-ui";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  const first = Math.ceil(now - WINDOW_SEC * NOW_AT), last = Math.floor(now + WINDOW_SEC * (1 - NOW_AT));
+  for (let t = Math.max(first, 0); t <= last; t++) {
+    const x = xOf(t);
+    ctx.fillStyle = "#3a3f4a";
+    ctx.fillRect(x, rollH, 1, t % 2 === 0 ? 8 : 4);
+    if (t % 2 === 0) { ctx.fillStyle = "#7d8494"; ctx.fillText(clock(t), x, rollH + 12); }
+  }
+  ctx.textAlign = "start";
+
+  // Where the engine is generating, when the view is behind it.
+  const engine = running ? engineTime() : music;
+  if (engine - now > 0.05 && xOf(engine) <= width) {
+    ctx.fillStyle = "#4c8dff";
+    ctx.fillRect(xOf(engine) - 1, 0, 2, rollH);
+  }
+
+  // Now line (what the view is centred on).
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(nowX - 1, 0, 2, height);
+  ctx.fillRect(nowX - 1, 0, 2, rollH);
 
   // Piano keys, drawn last so they cover notes scrolling off the left.
   for (let pitch = LOW; pitch <= HIGH; pitch++) {
@@ -172,10 +300,12 @@ function draw() {
     if (pitch % 12 === 0 && rowH >= 6) {  // Label each C when there's room.
       ctx.fillStyle = "#3a3f4a";
       ctx.font = `${Math.min(rowH + 2, 11)}px system-ui`;
-      ctx.textBaseline = "middle";
       ctx.fillText(`C${pitch / 12 - 1}`, KEYS_W - 22, yOf(pitch) + rowH / 2);
     }
   }
+
+  const state = paused ? "paused" : engine - now > 0.05 ? `${(engine - now).toFixed(1)} s behind` : "live";
+  viewText.textContent = `view ${clock(Math.max(now, 0))} of ${clock(engine)} (${state}), ${notes.length} notes`;
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);

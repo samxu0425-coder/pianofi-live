@@ -115,6 +115,13 @@ Open http://localhost:8000 and press Play. You hear the song and see its notes s
 The default is `--stride 16 --delay 16`. The button is there because browsers only allow sound after a click.
 Engine logs stay on this console. Ctrl+C quits.
 
+Looking back: every note of the session is kept, so scroll the wheel or drag the roll sideways to see
+earlier ones (arrow keys move 1 s, Home or "Back to live" returns to where the engine is). Pause (or
+Space) freezes the view and, for a file, the song; the engine itself is never paused and keeps going at
+real-time pace, so notes keep arriving while paused and a blue line marks where the engine is. "Back to
+live" after a pause skips the song forward to the engine. The time axis along the bottom is song time,
+and the header shows the view's position, how far behind the engine it is, and the note count.
+
 For whatever the PC is playing (Spotify, YouTube), or the mic:
 
 ```powershell
@@ -309,6 +316,8 @@ by hand. Schema: `eval/sql/schema.sql`, three tables (`runs`, `timings`, `scores
 - `score_engine.py` stores each new score itself (with batch note count and the array check result,
   which results.md does not hold). The machine column is this PC's, so for runs made in Docker or on
   AWS, fix it once: `results_db.py sql "UPDATE runs SET machine = '...' WHERE name = '...'"`.
+- `import` (and `score_engine.py`) also applies `schema.sql`, so after editing the view, run `import` once.
+  `report` and `sql` only read, and leave the committed file unchanged.
 - `report` runs every `eval/sql/*.sql` except the schema and prints each as a markdown table.
   `report by_setting` runs one. The first line of each file is its title. The reports are:
   `by_setting` (F1, speed, lag per setting), `cache_effect` (cache on vs off, same setting),
