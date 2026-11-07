@@ -196,11 +196,11 @@ These use wav files, so they are repeatable. Each appends its table to results.m
 - `memory_check.py`: about 20 minutes. Exit code 1 if dropping old history changed any note.
 - `gpu_memory.py`: about 5 minutes. Close other GPU apps first.
 
-## 8. Linux build in Docker (written, NOT yet run)
+## 8. Linux build in Docker
 
 The `Dockerfile` builds the engine on Linux with CUDA 12, cuDNN 9 and ONNX Runtime 1.20.1, and
-runs `pf_tests` as part of the build. Nobody has built or run it yet: this PC has no Docker, and
-virtualization is off in its BIOS. Until it has run, treat every step here as untested.
+runs `pf_tests` as part of the build. Built and run on this PC on 2026-11-06 (Docker Desktop 29.9.2):
+the stride 512 check passes with F1 = 1.0000, and the rows are in results.md.
 
 Needs: virtualization on in the BIOS, Docker Desktop (WSL 2 backend), and a current NVIDIA driver.
 
@@ -215,15 +215,17 @@ docker run --rm --gpus all -v ${PWD}\models:/work/models -v ${PWD}\test_audio:/w
   "CUDA unavailable" means the container can't see the GPU.
 - The third scores that run on Windows, like step 4. Expect the same: array check PASSED, decoder
   check PASSED, F1 = 1.0000.
-- `score_engine.py` writes this PC's name in the machine column. For a run made on another machine
-  (a cloud GPU), fix that column by hand, or the row is wrong.
+- `score_engine.py` writes this PC's name in the machine column and the command as the container
+  saw it (`/app/pianofi_live ...`). Fix both by hand in the new row: add that it ran in Docker (or on
+  which cloud machine), and put the `docker run ...` part in front of the command.
 - Mic and loopback input do not work in the container: a server has no sound card.
 
-## 9. A spot GPU machine on AWS for tests (written, NOT yet applied)
+## 9. A spot GPU machine on AWS for tests
 
 `infra/` is a Terraform script for one spot GPU machine (default `g4dn.xlarge`, one T4) in
-`us-east-1`. It is a test box: it does not touch the PianoFi cluster. It has never been applied or
-even validated, because there was no AWS account or Terraform on this PC when it was written.
+`us-east-1`. It is a test box: it does not touch the PianoFi cluster. Applied once, on 2026-11-06: the machine came up, the image built there and the runs are in
+results.md. AWS took the machine back after 13 minutes, before the run folders were copied off, so
+those runs have timings but no F1.
 Do step 8 on this PC first, so the paid time is not spent on build errors.
 
 What it creates: the machine, a firewall rule that allows SSH from one address only, and an SSH key
@@ -268,13 +270,21 @@ scp -i $HOME\.ssh\pianofi_live -r ec2-user@<ip>:pf/runs/aws_s16 runs\
 terraform -chdir=infra destroy
 ```
 
+- Spot machines can be taken back at any moment with 2 minutes' notice. Copy each run folder back
+  right after its run, not at the end.
 - Always finish with `destroy`, and check in the AWS console that no instance or volume is left.
+  `destroy` can take about 7 minutes.
 - `score_engine.py` writes this PC's name in the machine column. Change it by hand to the AWS
   machine type for these rows.
 - If `apply` fails with a spot limit error (`MaxSpotInstanceCountExceeded`), the account's limit
   "All G and VT Spot Instance Requests" is too low: one `g4dn.xlarge` needs 4 vCPUs of it. The
   account owner said to request an increase in Service Quotas.
 - If it fails with no spot capacity, set `availability_zone` to another zone and apply again.
+  Terraform does not give up on its own: it keeps retrying the spot request silently, and the
+  `timeouts { create }` block does not stop that either, so kill it after 5 minutes if nothing was
+  created, remove `infra/.terraform.tfstate.lock.info`, and run `destroy` to drop the group and key.
+  On 2026-11-07 (00:00 to 03:00 UTC) us-east-1b never had a `g4dn.xlarge`; us-east-1a, 1c, 1d
+  and 1f gave one within 15 seconds, so try those first.
 
 ## Next steps (not built yet)
 

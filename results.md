@@ -91,6 +91,15 @@ F1 vs batch notes (50 ms onsets, offsets ignored). Lag = time from audio arrivin
 | 2026-11-06 02:12 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 62.2 | 77.4 | 1013 | 1144 | 0.261 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs\spsc-s16-d16-rt` |
 | 2026-11-06 02:42 | prettifun - Light (Instrumental) - swagdisease (128k).wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.8421 | 0.9192 | 0.8790 | 54.9 | 73.0 | not measured | not measured | 0.221 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav "test_audio\16k\prettifun - Light (Instrumental) - swagdisease (128k).wav" --stride 16 --delay 16 --fast --dump --out runs\prettifun-s16-d16` |
 | 2026-11-06 13:38 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 189.8 | 259.9 | not measured | not measured | 0.025 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs\check512` |
+| 2026-11-06 14:52 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 200.7 | 333.3 | not measured | not measured | 0.026 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10, in Docker Desktop (Linux container on WSL 2) | `docker run --rm --gpus all -v ${PWD}\models:/work/models -v ${PWD}	est_audio:/work/test_audio -v ${PWD}
+uns:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs/docker_check512` |
+| 2026-11-06 14:55 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 57.8 | 72.4 | 1008 | 1135 | 0.244 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10, in Docker Desktop (Linux container on WSL 2) | `docker run --rm --gpus all -v ${PWD}\models:/work/models -v ${PWD}	est_audio:/work/test_audio -v ${PWD}
+uns:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs/docker_s16_d16` |
+| 2026-11-06 21:51 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 453.1 | 564.1 | not measured | not measured | 0.058 | 0 | ok | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs/aws2_t4_check512` |
+| 2026-11-06 21:52 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 102.0 | 106.8 | 1052 | 1173 | 0.437 | 0 | ok | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs/aws2_t4_s16_d16` |
+| 2026-11-06 21:53 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 128 ms | b | yes | 0.9188 | 0.8836 | 0.9009 | 97.2 | 101.9 | 728 | 788 | 0.833 | 0 | ok | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 8 --dump --out runs/aws2_t4_s8` |
+| 2026-11-06 21:55 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 148.0 | 204.8 | 1098 | 1219 | 0.656 | 0 | ok, two engines at once on one T4 | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs/aws2_t4_two_a` |
+| 2026-11-06 21:55 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 156.1 | 203.8 | 1106 | 1227 | 0.687 | 0 | ok, two engines at once on one T4 | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs/aws2_t4_two_b` |
 
 ## Ring buffer benchmark, 2026-11-06
 
@@ -310,3 +319,54 @@ The test songs repeated to the given length, stride 256 ms + delay 256 ms. Frame
 | 5 min | dropped | 1296 | 4205 | 962 |
 | 20 min | kept | 75264 | 4205 | 1183 |
 | 20 min | dropped | 1490 | 4205 | 1019 |
+
+## AWS spot GPU (Tesla T4), 2026-11-06 22:09 UTC
+
+Machine: AWS `g4dn.xlarge` spot in us-east-1a (Tesla T4 15 GB, Intel Xeon Platinum 8259CL, 4 vCPUs), Amazon
+Linux 2023 ECS GPU image, NVIDIA driver 580.178.04, Docker 25.0.14. Engine built there from the `Dockerfile`.
+
+Commands: RUN.md step 9 creates the machine and builds the image. Each run is
+`docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/<song> <settings> --dump --out runs/<name>`.
+Song: `686610__seth_makes_sounds__bubbglegum-pop-song.wav` for stride 8192 ms, its first 60 s for the rest.
+GPU memory is the highest `nvidia-smi` reading during the run (0.5 s samples, 1 MB when idle).
+
+AWS took the spot machine back at 22:19:50 UTC, before the run folders were copied off it. So these
+numbers are the engine's own printed summary, and nothing here was scored against batch: P, R, F1 and
+the array and decoder checks are **not measured** on this machine. The note counts match the same runs
+on the RTX 4070 (1495 and 769).
+
+| settings | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | RTF | overruns | notes | GPU memory MB | F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| `--stride 512 --fast` | 463.7 | 567.4 | not measured | not measured | 0.059 | 0 | 1495 | 6153 | not measured |
+| `--stride 16 --delay 16` | 102.6 | 108.0 | 1053 | 1173 | 0.440 | 0 | 769 | 3021 | not measured |
+| `--stride 8` | 98.4 | 103.0 | 729 | 789 | 0.843 | 0 | 727 | 2863 | not measured |
+| `--stride 4` | 99.5 | 102.0 | not measured | not measured | 1.062 | 308,800 | 507 | 2845 | not measured |
+| `--stride 16 --delay 16 --no-cache` | 472.1 | 478.7 | not measured | not measured | 1.259 | 400,992 | 466 | 5939 | not measured |
+| `--stride 16 --delay 16`, two engines at once (A) | 190.2 | 231.4 | 1140 | 1262 | 0.820 | 0 | 769 | not measured | not measured |
+| `--stride 16 --delay 16`, two engines at once (B) | 192.6 | 222.3 | 1143 | 1265 | 0.831 | 0 | 769 | not measured | not measured |
+
+Lag is not measured where samples were dropped, because the lag clock assumes none were.
+
+Spot availability that evening: a second machine was requested at 22:29 UTC in us-east-1b and had not
+started 25 minutes later, when the request was cancelled. `aws ec2 get-spot-placement-scores` for one
+`g4dn.xlarge` gave 1 out of 10 in every us-east-1 zone. The account's on-demand limit for G instances is 0.
+
+### Second machine, 2026-11-07 02:49 UTC (scored)
+
+Same instance type, zone and image as above (us-east-1a, instance i-04b9c40bfaeff4e26), got by retrying
+the zones every 8 minutes; us-east-1b never had capacity, the other zones did. Each run folder was copied
+off the machine right after its run, so these rows are scored against batch (`eval/score_engine.py`, rows
+of 2026-11-06 21:51 to 21:55 local time in the table above). The machine was destroyed at the end.
+
+| settings | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | RTF | overruns | notes | GPU memory MB | P | R | F1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `--stride 512 --fast` (full song) | 453.1 | 564.1 | not measured | not measured | 0.058 | 0 | 1495 | 6153 | 1.0000 | 1.0000 | 1.0000 |
+| `--stride 16 --delay 16` | 102.0 | 106.8 | 1052 | 1173 | 0.437 | 0 | 769 | 3021 | 0.9155 | 0.9312 | 0.9233 |
+| `--stride 8` | 97.2 | 101.9 | 728 | 788 | 0.833 | 0 | 727 | 2863 | 0.9188 | 0.8836 | 0.9009 |
+| `--stride 16 --delay 16`, two engines at once (A) | 148.0 | 204.8 | 1098 | 1219 | 0.656 | 0 | 769 | 6039 (both) | 0.9155 | 0.9312 | 0.9233 |
+| `--stride 16 --delay 16`, two engines at once (B) | 156.1 | 203.8 | 1106 | 1227 | 0.687 | 0 | 769 | 6039 (both) | 0.9155 | 0.9312 | 0.9233 |
+
+The stride 512 run also passed the array check (max diff 2.69e-04 vs batch, velocity mismatch 0%) and
+the decoder check; every row passed the decoder check. F1, P, R and note counts are identical to the same
+settings on the RTX 4070 and in Docker on WSL 2, so the T4 changes speed only, not output. GPU memory is
+the peak `nvidia-smi` reading over the whole run (one sampler per run, so the two-engine value is both together).

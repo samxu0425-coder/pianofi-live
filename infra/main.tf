@@ -3,7 +3,7 @@
 # It is a test box, not the final service: nothing here touches the PianoFi
 # cluster, its load balancer or its data. `terraform destroy` removes all of it.
 #
-# NOT yet applied or validated: written before an AWS account was available.
+# Applied and destroyed for two test runs, on 2026-11-06 and 2026-11-07.
 
 terraform {
   required_version = ">= 1.5"
@@ -96,10 +96,11 @@ resource "aws_instance" "gpu" {
     }
   }
 
-  # Safety net for a forgotten machine: it shuts itself down after max_minutes,
-  # and shutting down deletes it (and its disk).
-  instance_initiated_shutdown_behavior = "terminate"
-  user_data                            = <<-EOT
+  # Safety net for a forgotten machine: it shuts itself down after max_minutes.
+  # A one-time spot machine cannot be stopped, so shutting down deletes it (and
+  # its disk). AWS refuses instance_initiated_shutdown_behavior on spot, so it
+  # is not set here.
+  user_data = <<-EOT
     #!/bin/bash
     shutdown -h +${var.max_minutes}
   EOT
@@ -113,6 +114,11 @@ resource "aws_instance" "gpu" {
 
   metadata_options {
     http_tokens = "required"
+  }
+
+  # Spot can have no capacity. Give up after this long instead of retrying for ever.
+  timeouts {
+    create = "5m"
   }
 
   tags = {
