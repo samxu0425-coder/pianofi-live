@@ -8,7 +8,8 @@ What's here:
 | `py/prep_audio.py` | Converts songs to 16 kHz mono exactly like the batch pipeline |
 | `py/check_mel.py` | C++ mel spectrogram vs a float64 run of the `Pipeline.wav2feature` transform |
 | `cpp/` | Engine: audio thread → ring buffer → mel → frame model + h cache → time model → note decoder |
-| `eval/score_engine.py` | F1 vs batch, decoder check vs `mpe2note`, appends a row to `results.md` |
+| `eval/score_engine.py` | F1 vs batch, decoder check vs `mpe2note`, appends a row to `results.md` and stores the run in `runs/results.db` |
+| `eval/results_db.py`, `eval/sql/` | SQLite results store: schema, import of every run, and the SQL reports behind the summary tables |
 | `eval/sweep.py` | Runs the grid (CPU/GPU, cache on/off, strides, A/B heads) and scores every run |
 | `eval/level_eval.py` | Automatic input level: quiet, tilted and dipping copies of each song, scored against batch |
 | `eval/memory_check.py` | Long sessions: dropping old history changes no notes and keeps memory bounded |
@@ -285,6 +286,37 @@ terraform -chdir=infra destroy
   created, remove `infra/.terraform.tfstate.lock.info`, and run `destroy` to drop the group and key.
   On 2026-11-07 (00:00 to 03:00 UTC) us-east-1b never had a `g4dn.xlarge`; us-east-1a, 1c, 1d
   and 1f gave one within 15 seconds, so try those first.
+
+## 10. The results database
+
+Every run folder has a `metrics.json` (timings, settings, counts) and every scored run has a row in
+results.md. `runs/results.db` is the same data in SQLite (standard library `sqlite3`, no extra
+packages), so questions like "same setting, every machine" are one query instead of reading tables
+by hand. Schema: `eval/sql/schema.sql`, three tables (`runs`, `timings`, `scores`) and the view
+`run_summary` that joins them with the latest score per run.
+
+```powershell
+.venv\Scripts\python.exe eval\results_db.py import
+.venv\Scripts\python.exe eval\results_db.py report
+.venv\Scripts\python.exe eval\results_db.py sql "SELECT gpu, stride_ms, delay_ms, f1, pass_p50_ms, lag_p99_ms FROM run_summary WHERE f1 IS NOT NULL ORDER BY f1 DESC"
+```
+
+- `import` reads every `runs/*/metrics.json` (28 runs on 2026-11-07), the peak GPU memory from
+  `runs/<name>.gpu_mb.txt` where step 9 wrote one, and the P, R, F1 and machine of every row in
+  results.md's engine table (matched by the `--out` folder in the command; 23 rows). It can be run
+  again at any time: runs are updated in place, results.md scores are replaced, scores written by
+  `score_engine.py` are kept.
+- `score_engine.py` stores each new score itself (with batch note count and the array check result,
+  which results.md does not hold). The machine column is this PC's, so for runs made in Docker or on
+  AWS, fix it once: `results_db.py sql "UPDATE runs SET machine = '...' WHERE name = '...'"`.
+- `report` runs every `eval/sql/*.sql` except the schema and prints each as a markdown table.
+  `report by_setting` runs one. The first line of each file is its title. The reports are:
+  `by_setting` (F1, speed, lag per setting), `cache_effect` (cache on vs off, same setting),
+  `machines` (same setting across the 4070, Docker and the T4), `exactness` (every stride 512
+  check), `stages` (where a pass spends its time).
+- The database is committed (about 60 KB). `import` rebuilds it from the run folders and results.md
+  if it is ever lost, except the batch note counts and array check results of scores that only
+  `score_engine.py` wrote.
 
 ## Next steps (not built yet)
 

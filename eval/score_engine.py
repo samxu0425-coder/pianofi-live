@@ -11,7 +11,7 @@ Reports:
     (must match: the C++ decoder is a port of it). Times may differ by 1e-5 s,
     or by one float32 step for notes past 128 s, where that step is larger.
   - array check: at stride 512 with heads b, the dumped arrays must match batch
-And appends one row to results.md.
+Appends one row to results.md and stores the run and score in runs/results.db (eval/results_db.py).
 """
 
 from __future__ import annotations
@@ -32,11 +32,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "amt-apc"))
 sys.path.insert(0, str(ROOT / "py"))
+sys.path.insert(0, str(ROOT / "eval"))
 
 import mir_eval
 import numpy as np
 import torch
 
+import results_db
 import stream_sim
 from models import Pipeline
 from utils import config
@@ -124,12 +126,16 @@ def main() -> int:
     print(f"decoder check (C++ vs mpe2note on the same arrays): {'PASSED' if dec_ok else 'FAILED'}"
           f" ({len(cpp_notes)} vs {len(py_notes)} notes)")
 
-    arr_ok = True
+    arr_ok = None  # only checked at stride 512
     if metrics["stride_frames"] == 512 and metrics["heads"] == "b":
         d = max(float(np.abs(a - b).max()) for a, b in zip(arrays[:3], batch_arrays[:3]))
         vel = float((arrays[3] != batch_arrays[3]).mean())
         arr_ok = d < 1e-3 and vel < 1e-3
         print(f"array check vs batch: max diff {d:.2e}, velocity mismatch {vel:.4%}: {'PASSED' if arr_ok else 'FAILED'}")
+
+    machine = stream_sim.machine_description()
+    results_db.record(run, metrics, machine, p, r, f, len(cpp_notes), len(reference), dec_ok, arr_ok)
+    print(f"Stored the run and score in {results_db.DB}")
 
     rm = ROOT / "results.md"
     lag = metrics["frame_lag_ms"]
@@ -151,7 +157,7 @@ def main() -> int:
         f"| {metrics['pass_ms']['p50']:.1f} | {metrics['pass_ms']['p99']:.1f} "
         f"| {lag_p50} | {lag_p99} | {metrics['real_time_factor']:.3f} "
         f"| {metrics['overrun_samples']} | {'ok' if dec_ok else 'MISMATCH'} "
-        f"| {stream_sim.machine_description()} | `{command}` |"
+        f"| {machine} | `{command}` |"
     )
     header = (
         "\n## C++ engine runs\n\n"
@@ -169,7 +175,7 @@ def main() -> int:
     text = rm.read_text(encoding="utf-8") if rm.exists() else ""
     rm.write_text(add_row(text, header, row), encoding="utf-8", newline="\n")
     print(f"Added a row to {rm}")
-    return 0 if dec_ok and arr_ok else 1
+    return 0 if dec_ok and arr_ok is not False else 1
 
 
 if __name__ == "__main__":
