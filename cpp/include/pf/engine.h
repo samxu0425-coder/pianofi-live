@@ -20,7 +20,7 @@
 
 namespace pf {
 
-enum class Input { File, Mic, Loopback };
+enum class Input { File, Mic, Loopback, Stdin };  // Stdin: 16 kHz mono float32 samples piped in (the browser, via ui/server.py)
 
 struct EngineConfig {
     Input input = Input::File;

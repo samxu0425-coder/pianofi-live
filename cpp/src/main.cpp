@@ -2,10 +2,12 @@
 //
 //   pianofi_live --wav test_audio\song_16k.wav [options]
 //   pianofi_live --input mic|loopback [options]        Ctrl+C stops
+//   pianofi_live --input stdin [options]               16 kHz mono float32 piped in; ends with the stream
 //
 //   pianofi_live --list-devices                        names for --device
 //
-//   --input KIND      file (default), mic, or loopback (what the PC is playing)
+//   --input KIND      file (default), mic, loopback (what the PC is playing), or stdin
+//                     (raw 16 kHz mono float32 samples, what ui/server.py sends from the browser)
 //   --device NAME     live input: part of a device name (default: the Windows default device)
 //   --models DIR     folder with frame.onnx, time.onnx, sv_<style>.bin (default: models)
 //   --style NAME      style vector file sv_NAME.bin (default: level2)
@@ -22,8 +24,11 @@
 //   --out DIR         where notes.csv and metrics.json go (default: runs/<timestamp>)
 //   --dump            also write raw model outputs + mel to --out for the Python checks
 //   --max-seconds X   only use the first X seconds of the wav; live input stops after X
+//   --start-seconds X skip the first X seconds of the wav (resume a stopped song; times count from X)
 //                     (default: live input runs until Ctrl+C)
 //   --bounded-memory  drop history that is no longer needed, as live input always does (for tests)
+//   --max-engines N   refuse to start if N engines already run on this machine (default: 1,
+//                     so two never share the GPU by accident; 0 = no limit)
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -42,6 +47,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 #include <psapi.h>
 #include <timeapi.h>
 #pragma comment(lib, "winmm.lib")
@@ -51,6 +58,7 @@
 
 #include "pf/capture.h"
 #include "pf/engine.h"
+#include "pf/engine_lock.h"
 #include "pf/wav.h"
 
 namespace fs = std::filesystem;
@@ -152,9 +160,9 @@ int list_devices() {
 
 int usage() {
     std::fprintf(stderr,
-                 "usage: pianofi_live (--wav FILE | --input mic|loopback [--device NAME] | --list-devices) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
+                 "usage: pianofi_live (--wav FILE | --input mic|loopback|stdin [--device NAME] | --list-devices) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
                  "                    [--no-cache] [--fast] [--events] [--normalize | --no-normalize] [--bounded-memory]\n"
-                 "                    [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X]\n");
+                 "                    [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X] [--start-seconds X] [--max-engines N]\n");
     return 2;
 }
 
@@ -169,7 +177,8 @@ int main(int argc, char** argv) {
     pf::ModelOptions mopt;
     bool try_cuda = true, dump = false;
     int normalize = -1;  // -1 = not given: on for live input, off for files
-    double max_seconds = 0;
+    double max_seconds = 0, start_seconds = 0;
+    int max_engines = 1;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> std::string {
@@ -197,6 +206,8 @@ int main(int argc, char** argv) {
             else if (a == "--out") out_dir = next();
             else if (a == "--dump") dump = true;
             else if (a == "--max-seconds") max_seconds = std::stod(next());
+            else if (a == "--start-seconds") start_seconds = std::stod(next());
+            else if (a == "--max-engines") max_engines = std::stoi(next());
             else return usage();
         } catch (const std::exception& e) {
             std::fprintf(stderr, "%s\n", e.what());
@@ -205,22 +216,27 @@ int main(int argc, char** argv) {
     }
     if (input_name == "mic") cfg.input = pf::Input::Mic;
     else if (input_name == "loopback") cfg.input = pf::Input::Loopback;
+    else if (input_name == "stdin") cfg.input = pf::Input::Stdin;
     else if (input_name != "file") return usage();
     const bool live = cfg.input != pf::Input::File;
     if (live != wav_path.empty()) return usage();  // exactly one of a wav file or a live input
     cfg.normalize = normalize == -1 ? live : normalize == 1;
-    if (live) {
-        if (max_seconds > 0) cfg.max_seconds = max_seconds;
-        cfg.stop = &g_stop;
-        std::signal(SIGINT, on_ctrl_c);  // finish cleanly, so notes and metrics get written
-#ifdef SIGBREAK
-        std::signal(SIGBREAK, on_ctrl_c);  // Ctrl+Break: what ui/server.py sends on Windows
+    if (live && max_seconds > 0) cfg.max_seconds = max_seconds;
+#ifdef _WIN32
+    if (cfg.input == pf::Input::Stdin) _setmode(_fileno(stdin), _O_BINARY);  // raw samples, no newline translation
 #endif
-    }
+    // Ctrl+C (and Ctrl+Break, what ui/server.py sends on Windows) ends any input cleanly: the
+    // engine stops reading, finishes the notes it has, and writes notes.csv and metrics.json.
+    cfg.stop = &g_stop;
+    std::signal(SIGINT, on_ctrl_c);
+#ifdef SIGBREAK
+    std::signal(SIGBREAK, on_ctrl_c);
+#endif
     if (out_dir.empty()) out_dir = "runs/" + timestamp();
     FILE* log = cfg.events ? stderr : stdout;  // with --events, stdout is only JSON
 
     try {
+        pf::EngineLock lock(max_engines);  // before the GPU is touched; held until this engine exits
         fs::create_directories(out_dir);
         if (dump) cfg.dump_dir = out_dir;
 
@@ -231,6 +247,10 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "%s is %d Hz. Convert it first: python py/prep_audio.py %s\n", wav_path.c_str(),
                              wav.sample_rate, wav_path.c_str());
                 return 1;
+            }
+            if (start_seconds > 0) {  // resume: the run starts here, and its times count from here
+                const size_t skip = std::min(wav.mono.size(), size_t(start_seconds * 16000));
+                wav.mono.erase(wav.mono.begin(), wav.mono.begin() + (std::ptrdiff_t)skip);
             }
             if (max_seconds > 0 && wav.mono.size() > size_t(max_seconds * 16000)) wav.mono.resize(size_t(max_seconds * 16000));
         }
@@ -312,6 +332,7 @@ int main(int argc, char** argv) {
             f << "  \"normalize\": " << (cfg.normalize ? "true" : "false") << ",\n";
             f << json_stats("gain", mx.gain) << ",\n";
             f << "  \"audio_sec\": " << mx.audio_sec << ",\n";
+            f << "  \"start_seconds\": " << start_seconds << ",\n";
             f << "  \"wall_sec\": " << mx.wall_sec << ",\n";
             f << "  \"compute_sec\": " << mx.compute_sec << ",\n";
             f << "  \"real_time_factor\": " << rtf << ",\n";

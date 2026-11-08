@@ -106,10 +106,13 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     for (size_t b = 0; b < n_slots; ++b) block_ns[b].store(-1, std::memory_order_relaxed);
     std::vector<double> jitter(n_blocks, 0.0);
     std::atomic<bool> producer_done{false};
+    std::atomic<bool> stopped_early{false};  // file input cut short by a stop request: no padding, like live
     std::atomic<size_t> overruns{0};
     LiveAudio live_audio{&ring, block_ns.get(), n_slots, size_t(cfg_.block), {}, &overruns};
     std::unique_ptr<Capture> capture;
-    if (live) {
+    if (cfg_.input == Input::Stdin) {
+        mx.capture_device = "stdin (16 kHz mono float32)";
+    } else if (live) {
         capture = std::make_unique<Capture>(cfg_.input == Input::Loopback, cfg_.device, kSr, on_live_audio, &live_audio);
         mx.capture_device = capture->description();
         std::fprintf(stderr, "Capturing from %s\n", mx.capture_device.c_str());
@@ -233,13 +236,28 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
     }
 
     // ----------------------------------------------------------- audio thread
-    // Live input: the sound card calls on_live_audio. File input: this thread acts like one.
+    // Live input: the sound card calls on_live_audio. Stdin input: a reader thread does,
+    // with whatever the sender pipes in (it ends at end of stream, or at the next block
+    // after a stop request). File input: this thread acts like a sound card.
     live_audio.t0 = t0;
-    if (live) capture->start();
+    if (capture) capture->start();
     std::thread producer;
+    if (cfg_.input == Input::Stdin) producer = std::thread([&] {
+        std::vector<float> buf(size_t(cfg_.block));  // allocated once, before any audio
+        while (!producer_done.load(std::memory_order_relaxed)) {
+            const size_t got = std::fread(buf.data(), sizeof(float), buf.size(), stdin);
+            if (got == 0) break;
+            on_live_audio(buf.data(), got, &live_audio);
+        }
+        producer_done.store(true, std::memory_order_release);
+    });
     if (!live) producer = std::thread([&] {
         const double block_sec = double(cfg_.block) / kSr;
         for (size_t b = 0; b < n_blocks; ++b) {
+            if (cfg_.stop && cfg_.stop->load(std::memory_order_relaxed)) {  // asked to stop: the file ends here
+                stopped_early.store(true, std::memory_order_release);
+                break;
+            }
             const size_t lo = b * cfg_.block;
             const size_t n = std::min<size_t>(cfg_.block, samples.size() - lo);
             if (cfg_.realtime) {
@@ -280,8 +298,8 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
             const bool asked = cfg_.stop && cfg_.stop->load(std::memory_order_relaxed);
             const bool timed_out = cfg_.max_seconds > 0 && ms_since(t0, Clock::now()) >= cfg_.max_seconds * 1000.0;
             if (asked || timed_out) {
-                capture->stop();
-                producer_done.store(true, std::memory_order_release);
+                if (capture) capture->stop();
+                producer_done.store(true, std::memory_order_release);  // the stdin reader sees this at its next block
             }
         }
         size_t got = ring.pop(pop_buf.data(), pop_buf.size());
@@ -317,7 +335,8 @@ std::vector<Note> Engine::run(const std::vector<float>& samples, Metrics& mx) {
         // A file is padded to a multiple of 512 frames, as batch does. A live
         // stream just ends, so a stop request doesn't wait on up to 8 s of padding.
         // Stopped before any audio arrived: nothing to output at all.
-        if (eof) n_output = !live ? (n_have + kWindow - 1) / kWindow * kWindow : mel.samples_seen() == 0 ? 0 : n_have;
+        if (eof) n_output = !live && !stopped_early.load(std::memory_order_acquire) ? (n_have + kWindow - 1) / kWindow * kWindow
+                            : mel.samples_seen() == 0 ? 0 : n_have;
 
         bool ran = false;
         while (true) {
