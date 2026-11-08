@@ -18,6 +18,10 @@
   #legend i { width: 80px; height: 8px; border-radius: 4px;
               background: linear-gradient(to right, hsl(220 80% 60%), hsl(110 80% 60%), hsl(0 80% 60%)); }
   #help { padding: 0 16px 6px; color: #5f6675; font-size: 12px; }
+  select { font: inherit; padding: 5px 8px; border: 1px solid #3a3f4a; border-radius: 6px; background: #1f232b; color: #e6e8ec; max-width: 320px; }
+  #drop { padding: 5px 12px; border: 1px dashed #4a5060; border-radius: 6px; color: #9aa0ac; cursor: pointer; }
+  #drop.over { border-color: #4c8dff; color: #e6e8ec; }
+  #file { display: none; }
   canvas { flex: 1; min-height: 0; width: 100%; display: block; cursor: grab; }
   canvas.dragging { cursor: grabbing; }
 </style>
@@ -25,15 +29,26 @@
 <body>
 <header>
   <h1>PianoFi Live</h1>
+  <select id="source" title="What to transcribe" hidden>
+    <option value="song">Transcribe: a song</option>
+    <option value="mic">Transcribe: my microphone</option>
+    <option value="tab">Transcribe: a tab's audio</option>
+  </select>
+  <select id="song" title="Song to play" hidden></select>
+  <label id="drop" for="file" hidden>Drop a song here, or click</label>
+  <input id="file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac">
   <button id="play">Play</button>
-  <button id="pause" class="quiet" disabled>Pause</button>
+  <button id="replay" class="quiet" hidden>Replay</button>
   <button id="live" class="quiet" hidden>Back to live</button>
+  <button id="download" class="quiet" disabled>Download MIDI</button>
+  <button id="clear" class="quiet" disabled>Clear</button>
   <span id="lag">lag: not measured yet</span>
   <span id="view"></span>
   <span id="status">Connecting...</span>
   <span id="legend">quiet <i></i> loud</span>
 </header>
-<div id="help">Scroll or drag the roll to look back at earlier notes. Space pauses the view, Home jumps back to live.</div>
+<div id="help">Scroll or drag the roll to look back at earlier notes. Home jumps back to live.
+"A tab's audio" asks which tab or screen to share: tick "Share tab audio" (or "share system audio") in that dialog.</div>
 <canvas id="roll"></canvas>
 <audio id="audio" preload="auto"></audio>
 
@@ -50,58 +65,286 @@ const canvas = document.getElementById("roll");
 const ctx = canvas.getContext("2d");
 const audio = document.getElementById("audio");
 const playButton = document.getElementById("play");
-const pauseButton = document.getElementById("pause");
+const replayButton = document.getElementById("replay");
 const liveButton = document.getElementById("live");
+const downloadButton = document.getElementById("download");
+const clearButton = document.getElementById("clear");
+const songSelect = document.getElementById("song");
+const sourceSelect = document.getElementById("source");
+const dropZone = document.getElementById("drop");
+const fileInput = document.getElementById("file");
 const lagText = document.getElementById("lag");
 const viewText = document.getElementById("view");
 const statusText = document.getElementById("status");
 
 let notes = [];     // {pitch, onset, vel, offset}; offset is null until the note ends. All of them are kept.
 let lags = [];      // t_wall - onset of the last 20 notes
-let input = "file"; // "file", "loopback" or "mic": the server says which
+let serverInput = "file";  // what the server captures: "file" (songs, or what the page sends), "loopback" or "mic"
+let canUpload = true;      // false for a guest login behind the front: no drop box (the server refuses too)
+let input = "file"; // "file": a song plays here; "browser": this page streams its mic or a tab; else the server's device
 let running = false;
 let wallOrigin = null;  // page time (s) at which the engine's t_wall was 0
+let clockStop = null;   // live input: song time where the engine ended, so the clock stops there
+let runOffset = 0;      // song time at which the current run started: Play after Stop resumes there
+let lastRun = null;     // what the notes on the roll came from; a different song or source clears them
 
-// The view: what song time the "now" line shows. Normally it follows the music.
-// Pausing freezes it (and the song, for a file); scrolling moves it back by `behind` seconds.
-// The engine itself is never paused: with live input the music carries on, so notes
-// keep arriving and are there to scroll through.
-let paused = false;
-let pausedAt = 0;   // song time when the view was paused
-let behind = 0;     // how far the view is behind the music, seconds
+// The view: what song time the roll is centred on. Normally it follows the music.
+// Scrolling back anchors it on a spot, like a DAW: the view stays put and the music's
+// playhead travels across it. Stop ends the engine (and the song); Play carries on.
+let anchor = null;      // song time the view is held at, or null while it follows the music
+let replaying = false;  // the roll is playing its notes again, no engine involved
+let sessionEnd = 0;     // live input: song time where the last capture ended (Play continues there)
 
-const ws = new WebSocket(`ws://${location.hostname}:${Number(location.port) + 1}`);
+// Events come over a WebSocket: next port up when the page is served directly, or
+// /ws on the same origin behind the HTTPS proxy (deploy/Caddyfile routes it).
+const ws = new WebSocket(location.protocol === "https:"
+  ? `wss://${location.host}/ws`
+  : `ws://${location.hostname}:${Number(location.port) + 1}`);
 ws.onopen = () => { statusText.textContent = "Ready"; };
 ws.onclose = () => { statusText.textContent = "Server stopped"; playButton.disabled = true; audio.pause(); };
 ws.onmessage = (message) => handleEvent(JSON.parse(message.data));
 
 // Browsers only allow sound after a click, so the click is what starts the engine.
-playButton.onclick = () => {
-  if (running) {  // only possible with live input, where the button turns into Stop
-    ws.send("stop");
+playButton.onclick = async () => {
+  if (running) {  // the button is Stop while the engine runs
+    streaming = false;
+    ws.send(JSON.stringify({ type: "stop" }));
     statusText.textContent = "Stopping...";  // the engine finishes its last notes first
     playButton.disabled = true;
+    if (input === "file") audio.pause();
     return;
   }
+  if (input === "browser") {
+    try {
+      await startCapture(sourceSelect.value);
+    } catch (err) {
+      statusText.textContent = `Could not capture audio: ${err.message}`;
+      return;
+    }
+  }
+  // Same song or source as the notes already on the roll: carry on from where it stopped.
+  // A song resumes from the song's position (the engine starts there), the mic or a tab from
+  // the end of the previous capture. Anything else starts a fresh roll.
+  const key = input === "file" ? `song:${songSelect.value}` : `${input}:${sourceSelect.value}`;
+  let resume = notes.length > 0 && lastRun === key;
+  if (resume && input === "file" && audio.duration && audio.currentTime > audio.duration - 0.5) resume = false;  // the song had ended
+  if (resume) {
+    runOffset = input === "file" ? audio.currentTime : sessionEnd;
+    notes = notes.filter((n) => n.onset < runOffset);  // the engine makes these again
+  } else {
+    runOffset = 0;
+    notes = [];
+    lags = [];
+  }
+  lastRun = key;
   running = true;
   wallOrigin = null;
-  notes = [];
-  lags = [];
-  setPaused(false);
-  behind = 0;
+  clockStop = null;
+  anchor = null;
   statusText.textContent = "Loading the model...";
   updateButtons();
-  ws.send("play");
+  ws.send(JSON.stringify({ type: "play", song: songSelect.value, source: input === "browser" ? "browser" : "server",
+                           start: input === "file" ? runOffset : 0 }));
 };
-pauseButton.onclick = () => setPaused(!paused);
+
+clearButton.onclick = () => {
+  notes = [];
+  lags = [];
+  clockStop = null;
+  sessionEnd = 0;
+  runOffset = 0;
+  lastRun = null;
+  anchor = null;
+  replaying = false;
+  if (input === "file") { audio.pause(); seekSong(0); }
+  lagText.textContent = "lag: not measured yet";
+  statusText.textContent = "Cleared";
+  updateButtons();
+};
+
+// What to transcribe. A song plays here; the mic or a tab is captured here and streamed
+// to the engine as 16 kHz mono float32, the format it reads from stdin.
+sourceSelect.onchange = applySource;
+function applySource() {
+  input = serverInput !== "file" ? serverInput : sourceSelect.value === "song" ? "file" : "browser";
+  songSelect.hidden = input !== "file";
+  dropZone.hidden = input !== "file" || !canUpload;  // guests pick from the list; the admin adds to it
+  updateButtons();
+}
+
+const WORKLET = `class Tap extends AudioWorkletProcessor {
+  process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice()); return true; }
+}
+registerProcessor("tap", Tap);`;
+let capture = null;    // {ctx, stream} while the mic or a tab is being captured
+let streaming = false; // true once the engine is ready for samples
+
+async function startCapture(kind) {
+  const stream = kind === "mic"
+    ? await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+    : await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });  // Chrome needs video to offer tab audio
+  if (kind === "tab") {
+    for (const t of stream.getVideoTracks()) t.stop();
+    if (stream.getAudioTracks().length === 0) { stream.getTracks().forEach((t) => t.stop()); throw new Error('no audio was shared; tick "Share tab audio"'); }
+  }
+  const ctx = new AudioContext({ sampleRate: 16000 });  // the browser resamples the stream to this
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+  const node = new AudioWorkletNode(ctx, "tap", { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: "explicit" });
+  let chunks = [], length = 0;
+  node.port.onmessage = (m) => {  // 128 samples at a time; send 320 (20 ms) at once
+    if (!streaming || ws.readyState !== 1) return;
+    chunks.push(m.data);
+    length += m.data.length;
+    if (length < 320) return;
+    const out = new Float32Array(length);
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.length; }
+    ws.send(out.buffer);
+    chunks = []; length = 0;
+  };
+  ctx.createMediaStreamSource(stream).connect(node);
+  stream.getAudioTracks()[0].onended = () => { if (running) playButton.click(); };  // sharing stopped from the browser's bar
+  capture = { ctx, stream };
+}
+
+function stopCapture() {
+  streaming = false;
+  if (!capture) return;
+  capture.stream.getTracks().forEach((t) => t.stop());
+  capture.ctx.close();
+  capture = null;
+}
+
+// Songs: the server's list, with the one the engine will play (or is playing) selected.
+function setSongs(songs, song) {
+  songSelect.replaceChildren(...songs.map((name) => new Option(name, name, false, name === song)));
+  selectSong(song);
+}
+function selectSong(song) {
+  songSelect.value = song;
+  const src = `/songs/${encodeURIComponent(song)}`;
+  if (audio.getAttribute("src") !== src) audio.src = src;
+}
+songSelect.onchange = () => { if (!running) selectSong(songSelect.value); };
+
+// Dropping a song: the browser decodes it (any format it can play), mixes it to mono
+// and resamples it to 16 kHz, which is what the engine takes. Then it is uploaded.
+dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add("over"); };
+dropZone.ondragleave = () => dropZone.classList.remove("over");
+dropZone.ondrop = (e) => { e.preventDefault(); dropZone.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) upload(fileInput.files[0]); fileInput.value = ""; };
+
+async function upload(file) {
+  const RATE = 16000;
+  try {
+    statusText.textContent = `Decoding ${file.name}...`;
+    const decoded = await new AudioContext().decodeAudioData(await file.arrayBuffer());
+    const frames = Math.ceil(decoded.duration * RATE);
+    const offline = new OfflineAudioContext(1, frames, RATE);  // one channel: the mix of all of them
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const mono = (await offline.startRendering()).getChannelData(0);
+    statusText.textContent = `Uploading ${file.name} (${decoded.duration.toFixed(0)} s)...`;
+    const response = await fetch(`/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: wavFile(mono, RATE) });
+    if (!response.ok) throw new Error(await response.text());
+    const { name } = await response.json();
+    ws.send(JSON.stringify({ type: "songs" }));  // every page gets the new list
+    pendingSong = name;  // selected when that list arrives
+    statusText.textContent = `Added ${name}`;
+  } catch (err) {
+    statusText.textContent = `Could not add ${file.name}: ${err.message}`;
+  }
+}
+let pendingSong = null;
+
+// A float32 wav, the format py/prep_audio.py writes.
+function wavFile(samples, rate) {
+  const bytes = new ArrayBuffer(44 + samples.length * 4);
+  const v = new DataView(bytes);
+  const text = (at, s) => { for (let i = 0; i < s.length; i++) v.setUint8(at + i, s.charCodeAt(i)); };
+  text(0, "RIFF"); v.setUint32(4, 36 + samples.length * 4, true); text(8, "WAVE");
+  text(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 3, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 32, true);
+  text(36, "data"); v.setUint32(40, samples.length * 4, true);
+  new Float32Array(bytes, 44).set(samples);
+  return new Blob([bytes], { type: "audio/wav" });
+}
 liveButton.onclick = goLive;
+replayButton.onclick = () => (replaying ? stopReplay() : replay());
+downloadButton.onclick = downloadMidi;
+audio.onended = () => { if (replaying) stopReplay("Replay finished"); };
+
+// Play the notes already on the page again from the start. The engine is not run
+// again: its output for the same audio and settings would be the same.
+function replay() {
+  anchor = null;
+  replaying = true;
+  if (input === "file") {
+    seekSong(0);
+    audio.play();
+  } else {
+    runOffset = 0;
+    clockStop = sessionEnd;  // a silent replay runs to the end of the capture
+    wallOrigin = performance.now() / 1000;  // live input has no recording, so the roll replays silently
+  }
+  statusText.textContent = "Replaying";
+  updateButtons();
+}
+
+function stopReplay(status = "Replay stopped") {
+  replaying = false;
+  if (input === "file") audio.pause();
+  else clockStop = musicTime();  // the roll stays where the replay stopped
+  statusText.textContent = status;
+  updateButtons();
+}
+
+// The notes as a standard MIDI file (format 0, one piano track), like note2midi makes.
+function midiFile() {
+  const TICKS_PER_SEC = 960;  // 480 ticks per quarter at 120 bpm
+  const events = [];
+  for (const n of notes) {
+    const off = n.offset ?? musicTime();
+    events.push({ t: n.onset, bytes: [0x90, n.pitch, Math.max(1, Math.min(127, Math.round(n.vel)))] });
+    events.push({ t: Math.max(off, n.onset + 0.001), bytes: [0x80, n.pitch, 0] });
+  }
+  events.sort((a, b) => a.t - b.t || a.bytes[0] - b.bytes[0]);  // offs before ons at the same time
+  const track = [0, 0xff, 0x51, 3, 0x07, 0xa1, 0x20,  // tempo 500000 us per quarter
+                 0, 0xc0, 0];                          // program 0, piano
+  let last = 0;
+  for (const e of events) {
+    const tick = Math.round(e.t * TICKS_PER_SEC);
+    track.push(...varLen(tick - last), ...e.bytes);
+    last = tick;
+  }
+  track.push(0, 0xff, 0x2f, 0);  // end of track
+  const be32 = (v) => [v >>> 24 & 255, v >>> 16 & 255, v >>> 8 & 255, v & 255];
+  const header = [0x4d, 0x54, 0x68, 0x64, ...be32(6), 0, 0, 0, 1, 0x01, 0xe0];  // MThd, format 0, 1 track, 480 tpq
+  return new Uint8Array([...header, 0x4d, 0x54, 0x72, 0x6b, ...be32(track.length), ...track]);
+}
+
+function varLen(value) {
+  const out = [value & 0x7f];
+  while ((value >>= 7) > 0) out.unshift((value & 0x7f) | 0x80);
+  return out;
+}
+
+function downloadMidi() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([midiFile()], { type: "audio/midi" }));
+  a.download = `pianofi-live-${stamp}.mid`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function goLive() {
-  behind = 0;
+  anchor = null;
   // The engine plays a file at real-time pace whether or not the song is paused here,
   // so "live" is where the engine is: skip the song forward to it.
   if (input === "file" && running) seekSong(engineTime());
-  setPaused(false);
   updateButtons();
 }
 
@@ -112,7 +355,6 @@ function seekSong(seconds) {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && !pauseButton.disabled) { e.preventDefault(); setPaused(!paused); }
   if (e.code === "Home") goLive();
   if (e.code === "ArrowLeft") scrollBy(1);
   if (e.code === "ArrowRight") scrollBy(-1);
@@ -125,60 +367,51 @@ canvas.addEventListener("wheel", (e) => {
 
 // Drag the roll sideways to scroll it.
 let drag = null;
-canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, behind }; canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, at: viewTime() }; canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId); });
 canvas.addEventListener("pointermove", (e) => {
   if (!drag) return;
   const pxPerSec = (canvas.clientWidth - KEYS_W) / WINDOW_SEC;
-  setBehind(drag.behind + (e.clientX - drag.x) / pxPerSec);
+  setAnchor(drag.at - (e.clientX - drag.x) / pxPerSec);
 });
 canvas.addEventListener("pointerup", () => { drag = null; canvas.classList.remove("dragging"); });
 canvas.addEventListener("pointercancel", () => { drag = null; canvas.classList.remove("dragging"); });
 
-function scrollBy(seconds) { setBehind(behind + seconds); }
+function scrollBy(seconds) { setAnchor(viewTime() - seconds); }
 
-function setBehind(seconds) {
-  // Can't look before the start of the music, or ahead of it.
-  behind = Math.min(Math.max(seconds, 0), musicTime());
-  updateButtons();
-}
-
-function setPaused(on) {
-  if (on === paused) return;
-  paused = on;
-  if (on) {
-    pausedAt = musicTime();
-    if (input === "file") audio.pause();
-  } else if (input === "file" && running) {
-    audio.play();
-  }
+function setAnchor(time) {
+  // Can't look before the start of the music, or ahead of the engine.
+  anchor = Math.min(Math.max(time, 0), running ? engineTime() : musicTime());
   updateButtons();
 }
 
 function updateButtons() {
-  const live = input !== "file";
-  playButton.textContent = running && live ? "Stop" : "Play";
-  playButton.disabled = running && !live;  // a file just plays to its end
-  pauseButton.disabled = !running && !paused;
-  pauseButton.textContent = paused ? "Resume" : "Pause";
-  liveButton.hidden = behind < 0.05 && !paused;
+  playButton.textContent = running ? "Stop" : "Play";
+  playButton.disabled = replaying;
+  songSelect.disabled = sourceSelect.disabled = running;
+  replayButton.hidden = running || notes.length === 0;
+  replayButton.textContent = replaying ? "Stop replay" : "Replay";
+  liveButton.hidden = anchor === null;
+  downloadButton.disabled = notes.length === 0;
+  clearButton.disabled = running || replaying || notes.length === 0;
 }
 
 // Song time of the music itself. A file: where the audio is. Live: seconds since the engine started.
 function musicTime() {
   if (input === "file") return audio.currentTime;
-  return wallOrigin === null ? 0 : performance.now() / 1000 - wallOrigin;
+  const t = wallOrigin === null ? runOffset : runOffset + performance.now() / 1000 - wallOrigin;
+  return clockStop === null ? t : Math.min(t, clockStop);  // a finished session stays at its length
 }
 
 // Song time the engine has reached: it runs at real-time pace from its start.
 function engineTime() {
-  if (wallOrigin === null) return 0;
-  const elapsed = performance.now() / 1000 - wallOrigin;
+  if (wallOrigin === null) return runOffset;
+  const elapsed = runOffset + performance.now() / 1000 - wallOrigin;
   return input === "file" && audio.duration ? Math.min(elapsed, audio.duration) : elapsed;
 }
 
 // Song time at the "now" line of the roll.
 function viewTime() {
-  return (paused ? pausedAt : musicTime()) - behind;
+  return anchor !== null ? anchor : musicTime();
 }
 
 function handleEvent(e) {
@@ -186,38 +419,57 @@ function handleEvent(e) {
   if (wallOrigin === null && e.t_wall !== undefined) wallOrigin = performance.now() / 1000 - e.t_wall;
 
   if (e.type === "mode") {
-    input = e.input;
+    serverInput = e.input;
     running = e.running;
-    if (input === "file") audio.src = "/song.wav";
+    canUpload = e.can_upload !== false;
+    if (serverInput === "file") {
+      setSongs(e.songs, pendingSong && e.songs.includes(pendingSong) ? pendingSong : e.song);
+      pendingSong = null;
+    }
+    sourceSelect.hidden = serverInput !== "file";
+    applySource();
     if (running) statusText.textContent = "Running";
-    updateButtons();
+  } else if (e.type === "song") {
+    if (e.song) selectSong(e.song);  // what the engine is playing now
   } else if (e.type === "start") {
     if (input === "file") {
-      audio.currentTime = 0;
+      seekSong(runOffset);
       audio.play();
     }
-    statusText.textContent = { file: "Playing", loopback: "Listening to this PC's audio", mic: "Listening to the mic" }[input];
+    if (input === "browser") streaming = true;  // the engine is ready: start sending samples
+    statusText.textContent = { file: "Playing", loopback: "Listening to this PC's audio", mic: "Listening to the mic",
+                               browser: sourceSelect.value === "mic" ? "Listening to the microphone" : "Listening to the shared tab" }[input];
   } else if (e.type === "on") {
-    notes.push({ pitch: e.pitch, onset: e.onset, vel: e.vel, offset: null });
-    lags.push(e.t_wall - e.onset);
+    notes.push({ pitch: e.pitch, onset: e.onset + runOffset, vel: e.vel, offset: null });
+    if (notes.length === 1) updateButtons();  // the first note makes a download possible
+    // Lag: engine side (audio reached the engine -> note out). For audio sent from this
+    // page, measured here instead: samples left this page at song time = page time - origin.
+    lags.push(input === "browser" ? performance.now() / 1000 - wallOrigin - e.onset : e.t_wall - e.onset);
     if (lags.length > 20) lags.shift();
-    lagText.textContent = `lag: ${median(lags).toFixed(2)} s (median of last ${lags.length} notes)`;
+    lagText.textContent = `lag${input === "browser" ? " (end to end)" : ""}: ${median(lags).toFixed(2)} s (median of last ${lags.length} notes)`;
   } else if (e.type === "off") {
     // Sounding notes are recent, so search from the end.
+    const onset = e.onset + runOffset;
     let index = notes.length - 1;
-    while (index >= 0 && !(notes[index].pitch === e.pitch && notes[index].onset === e.onset)) index--;
+    while (index >= 0 && !(notes[index].pitch === e.pitch && notes[index].onset === onset)) index--;
     if (index >= 0) {
       if (e.offset - e.onset < MIN_NOTE_SEC) notes.splice(index, 1);
-      else notes[index].offset = e.offset;
+      else notes[index].offset = e.offset + runOffset;
     }
+  } else if (e.type === "busy") {
+    running = false;
+    statusText.textContent = `All ${e.max} engine slots are in use, try again in a moment`;
+    updateButtons();
   } else if (e.type === "warning") {
     statusText.textContent = e.text;
   } else if (e.type === "end") {
     const now = musicTime();
     for (const n of notes) if (n.offset === null) n.offset = now;  // a stopped engine sends no more "off" events
+    if (input !== "file") { clockStop = now; sessionEnd = now; }  // the roll and the timer stop here
     statusText.textContent = e.stopped ? "Stopped" : e.code === 0 ? "Finished"
       : `Engine failed (exit code ${e.code}), see the console`;
     running = false;
+    stopCapture();
     updateButtons();
   }
 }
@@ -282,16 +534,19 @@ function draw() {
   }
   ctx.textAlign = "start";
 
-  // Where the engine is generating, when the view is behind it.
+  // Where the music is (the engine while it runs), when that is not the view's centre.
+  // A quarter second of slack: the engine and the song keep slightly different clocks.
   const engine = running ? engineTime() : music;
-  if (engine - now > 0.05 && xOf(engine) <= width) {
+  if (Math.abs(engine - now) > 0.25 && xOf(engine) >= KEYS_W && xOf(engine) <= width) {
     ctx.fillStyle = "#4c8dff";
     ctx.fillRect(xOf(engine) - 1, 0, 2, rollH);
   }
 
-  // Now line (what the view is centred on).
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(nowX - 1, 0, 2, rollH);
+  // Now line: where the music is, drawn only while the view follows it.
+  if (anchor === null) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(nowX - 1, 0, 2, rollH);
+  }
 
   // Piano keys, drawn last so they cover notes scrolling off the left.
   for (let pitch = LOW; pitch <= HIGH; pitch++) {
@@ -304,7 +559,8 @@ function draw() {
     }
   }
 
-  const state = paused ? "paused" : engine - now > 0.05 ? `${(engine - now).toFixed(1)} s behind` : "live";
+  if (replaying && input !== "file" && clockStop !== null && music >= clockStop) stopReplay("Replay finished");
+  const state = anchor !== null ? `${(engine - now).toFixed(1)} s behind` : replaying ? "replay" : "live";
   viewText.textContent = `view ${clock(Math.max(now, 0))} of ${clock(engine)} (${state}), ${notes.length} notes`;
   requestAnimationFrame(draw);
 }
