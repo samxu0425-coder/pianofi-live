@@ -1,4 +1,5 @@
-# The image is built from cpp/ only. Everything else stays out of the build.
+# The image is built from cpp/ and ui/ only. Everything else stays out of the build.
 *
 !cpp
+!ui
 cpp/build

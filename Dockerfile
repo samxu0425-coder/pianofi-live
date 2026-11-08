@@ -27,6 +27,22 @@ RUN cmake -S /src/cpp -B /build -DONNXRUNTIME_DIR=/opt/onnxruntime \
  && cmake --build /build -j \
  && /build/pf_tests
 
+# Service image (docker build --target service): the engine plus the web server that
+# runs one engine per connected page. See RUN.md step 11. Mount /work/models and
+# /work/songs; it listens on 8000 (page) and 8001 (events).
+FROM base AS service
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip3 install --no-cache-dir websockets==14.1 soundfile==0.12.1
+COPY --from=build /build/pianofi_live /app/
+COPY ui /app/ui
+ENV PIANOFI_ENGINE=/app/pianofi_live
+WORKDIR /work
+EXPOSE 8000 8001
+CMD ["python3", "/app/ui/server.py", "--host", "0.0.0.0", "--songs", "/work/songs"]
+
+# Engine only (the default target).
 FROM base
 COPY --from=build /build/pianofi_live /build/pf_tests /build/bench_ring /app/
 WORKDIR /work

@@ -388,3 +388,68 @@ The stride 512 run also passed the array check (max diff 2.69e-04 vs batch, velo
 the decoder check; every row passed the decoder check. F1, P, R and note counts are identical to the same
 settings on the RTX 4070 and in Docker on WSL 2, so the T4 changes speed only, not output. GPU memory is
 the peak `nvidia-smi` reading over the whole run (one sampler per run, so the two-engine value is both together).
+
+## Cloud deploy, 2026-11-07
+
+One spot `g4dn.xlarge` (T4) made by `infra/deploy/` (RUN.md step 11): the service image (engine +
+`ui/server.py`, one engine per connected page, two at once) behind Caddy with HTTPS (Let's Encrypt
+for `54-174-0-35.sslip.io`, a fixed address) and a password.
+
+First machine, one-time spot in us-east-1a: apply 09:35 UTC (ready in 13 s), image built on the
+box and started 09:36 to 09:38, certificate obtained 09:38, page 401 without and 200 with the
+password. AWS reclaimed it at 16:56 UTC (`instance-terminated-no-capacity`), after 7 h 20 min.
+Second machine, persistent spot (stop on interruption) in us-east-1f (us-east-1d's default subnet
+turned out to be private): ready 19:42 UTC, deployed 19:46 UTC, same address and hostname, the
+certificate issued again. Spot price in us-east-1f at the time: $0.2555/h. Cost of both machines,
+estimated from the price and not read from the bill: about $1.90 for the first, $0.26/h for the
+second while it runs, plus the fixed address.
+
+Measured from this PC against the second machine, over the WebSocket through Caddy, with
+`cloud_session.py` and `cloud_mic.py` (scratch scripts that do what the page does; the engine on
+the box ran `--stride 16 --delay 16`, two sessions allowed):
+
+| path | notes | lag |
+|---|---|---|
+| song on the box (the engine reads the file there), 30 s | 300 | engine lag median 1.059 s, p99 1.177 s; event delivery jitter to this PC: median 0.000 s, max 0.013 s (measured against the engine's clock, so the constant network delay is not in it) |
+| microphone path: this PC streams the 60 s clip as 20 ms float32 frames into the engine's stdin, 30 s | 420 | **end to end (sample leaves this PC to its note back here) median 1.082 s and 1.091 s in two runs**, first notes 1.17 to 1.19 s; p99 2.91 s, but every note over 1.5 s has an onset past 29.2 s, i.e. the flush when the stream is stopped, not steady state |
+
+So the cloud round trip from this PC to us-east-1 adds under 0.1 s to the engine's own lag (1.00 s
+for the same audio piped into stdin on the RTX 4070 here, 1.06 s on the T4). The 420 notes against
+300 for the song path are the automatic input level, which is on for streamed audio and off for files.
+
+Measured on this PC before the deploy, same page and server, engine on the RTX 4070: a simulated
+microphone (the 60 s clip played through the Web Audio API into `getUserMedia`) streamed by the page's
+AudioWorklet into `pianofi_live --input stdin`: 127 notes in 15 s, end-to-end lag median **1.10 s**
+on the page. Two pages with different songs ran at once; a third was refused with "All 2 engine slots
+are in use". The real microphone and tab-sharing dialogs were not exercised.
+
+Front machine added 21:20 UTC: a `t4g.nano` (on-demand, $0.0042/h) took over the fixed address and
+HTTPS, and proxies to the GPU box over the VPC (RUN.md step 11). Through it: 401 without and 200 with
+the password, a 20 s session gave 135 notes at engine lag median 1.067 s, p99 1.177 s, event jitter
+max 0.015 s, the same as directly. With the service container stopped on the GPU box, the site
+answered with the offline page (HTTP 502 with the page as body, 994 bytes) within the proxy's 3 s
+dial timeout, and the app was back 3 s after the container was started. The GPU box itself is no
+longer reachable from the internet on its service ports (connection timed out from this PC).
+
+### Two logins, Start button, idle stop, 2026-11-08 01:14 to 02:30 UTC
+
+Added `infra/deploy/iam.tf` (a role for the front that may start the one GPU instance),
+`deploy/front/start.py` (the Start button's handler), a guest login, `--admin` in `ui/server.py`
+and `deploy/idle_stop.sh` (RUN.md step 11). `terraform apply`: 3 IAM resources in 7 s, the front
+updated in place in 60 s. Checked from this PC through the front (`site_check.py`, `ws_mode.ps1`,
+`start_loop.py`, scratch scripts; passwords read from files):
+
+| check | result |
+|---|---|
+| page without login / as `sam` / as `guest` | 401 / 200 / 200 |
+| `GET /start` as `sam` / `guest` | `admin: true, left: null` / `admin: false, left: 3` |
+| `POST /start` while the box runs | `started: false`, guest's count unchanged |
+| upload as `guest`, also with a forged `X-User: sam` header | 403 both (Caddy overwrites the header); as `sam`: 200 |
+| first WebSocket message as `guest` (forged header sent) | `"user": "guest", "can_upload": false`; as `sam`: `true` |
+| guest at 3 starts (counter set by hand) | `POST /start` 429 "you have used today's 3 starts"; admin 200 at the same moment |
+| box stopped by hand, Start clicked as `guest` | `started: true, left: 2`; the app answered 19 s after the click (box boot + container restart); the box's public address changed, the private one did not |
+| the same, clicked 2 s after the instance read "stopped" | AWS refused: `IncorrectSpotRequestState` (the spot request turned `disabled` 4 s after the instance showed stopped); the handler now retries for up to 30 s |
+| stopping the box by hand (`aws ec2 stop-instances` to state `stopped`) | 413 s the one time it was timed (AWS's shutdown, the first stop was not timed) |
+| the front after Terraform's stop/start for the new first-boot script | modified in 43 s, site answering (401 without login) 1 s after `apply` returned, certificate kept |
+| idle stop (30 min with no engine) | the box started at 01:52:19 UTC (Start click), nobody played, `aws ec2 describe-instances` showed it `stopping` at 02:26:04 UTC (a once-a-minute poll): 33 min 45 s after the start, i.e. 30 idle minutes counted from the first timer tick plus boot and shutdown time |
+

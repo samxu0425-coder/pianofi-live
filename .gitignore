@@ -9,13 +9,16 @@ cpp/build/
 amt-apc/
 
 # Terraform: downloaded providers, state (holds resource ids) and personal settings
-infra/.terraform/
-infra/*.tfstate*
-infra/terraform.tfvars
+infra/**/.terraform/
+infra/**/*.tfstate*
+infra/**/terraform.tfvars
 
 # Generated or too large for git: py/export_onnx.py, py/prep_audio.py and the engine remake these
 models/
 runs/*
 !runs/results.db
 test_audio/
-infra/tfplan
+infra/**/tfplan
+infra/**/password.txt
+infra/**/password_hash.txt
+infra/**/guest_password.txt

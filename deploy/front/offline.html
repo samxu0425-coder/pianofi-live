@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PianoFi Live</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #14161b; color: #e6e8ec; font: 16px system-ui, sans-serif; }
+  main { max-width: 520px; margin: 18vh auto 0; padding: 0 24px; line-height: 1.5; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { color: #9aa0ac; margin: 0 0 12px; }
+  button { font: inherit; padding: 8px 18px; border: 0; border-radius: 6px; background: #4c8dff; color: #fff; cursor: pointer; }
+  button:disabled { background: #2a2f3a; color: #6a7080; cursor: default; }
+  #note { color: #e6e8ec; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The piano engine is offline right now</h1>
+  <p>PianoFi Live runs on a GPU machine that AWS lends out as spare capacity (a spot instance).
+     It stops itself when nobody has played for a while, and AWS can take it back when it needs
+     the capacity. Starting it takes a minute or two.</p>
+  <p><button id="start" disabled>Start the engine</button></p>
+  <p id="note">Checking the machine...</p>
+</main>
+<script>
+const button = document.getElementById("start");
+const note = document.getElementById("note");
+let polling = false;
+
+async function api(method) {
+  const response = await fetch("/start", { method, cache: "no-store" });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+// The app answers (not this page, which keeps its 502) once the box and its service are up.
+function waitForApp() {
+  if (polling) return;
+  polling = true;
+  const check = async () => {
+    try {
+      const response = await fetch("/", { method: "HEAD", cache: "no-store" });
+      if (response.ok) { location.reload(); return; }
+    } catch (err) { /* still down */ }
+    setTimeout(check, 10000);
+  };
+  setTimeout(check, 10000);
+}
+
+function show(status) {
+  const left = status.left === null || status.left === undefined ? "" : ` You have ${status.left} of today's starts left.`;
+  if (status.state === "pending" || status.state === "running") {
+    button.disabled = true;
+    note.textContent = status.state === "pending"
+      ? "The machine is starting. This page opens the app as soon as it answers (usually within two minutes)."
+      : "The machine is up but the app is not answering yet (it starts a few seconds after the machine). Waiting...";
+    waitForApp();
+  } else if (status.state === "stopping") {
+    button.disabled = true;
+    note.textContent = "The machine is shutting down right now; it can be started again in about a minute.";
+    setTimeout(refresh, 15000);
+  } else if (status.left === 0) {
+    button.disabled = true;
+    note.textContent = "You have used today's starts. Ask the admin to start it, or try tomorrow.";
+  } else {
+    button.disabled = false;
+    note.textContent = "It is stopped." + left;
+  }
+}
+
+async function refresh() {
+  try { show(await api("GET")); } catch (err) { note.textContent = `Could not check the machine: ${err.message}`; }
+}
+
+button.onclick = async () => {
+  button.disabled = true;
+  note.textContent = "Starting...";
+  try { show(await api("POST")); } catch (err) { note.textContent = `Could not start it: ${err.message}`; setTimeout(refresh, 5000); }
+};
+
+refresh();
+setInterval(() => { if (!polling) refresh(); }, 60000);
+</script>
+</body>
+</html>

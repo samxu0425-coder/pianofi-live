@@ -1,0 +1,21 @@
+# HTTPS in front of the service container. Caddy gets a Let's Encrypt certificate
+# for {$SITE} on its own. {$SITE} is the hostname: <ip-with-dashes>.sslip.io works
+# without owning a domain (sslip.io resolves it to the ip). {$AUTH_USER} and
+# {$AUTH_HASH} (bcrypt, from `caddy hash-password`) keep strangers out: the box has
+# one GPU and two engine slots.
+{$SITE} {
+	basic_auth {
+		{$AUTH_USER} {$AUTH_HASH}
+	}
+	# Note events: the page opens wss://host/ws, the server listens on 8001.
+	handle /ws* {
+		reverse_proxy service:8001
+	}
+	# The page, the songs and uploads.
+	handle {
+		reverse_proxy service:8000
+	}
+	request_body {
+		max_size 200MB
+	}
+}

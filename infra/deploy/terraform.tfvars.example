@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (which git ignores) and fill in.
+
+# Your public address, then /32. Look it up at https://checkip.amazonaws.com
+my_ip_cidr = "203.0.113.7/32"
+
+# The two logins. Hashes come from `docker run --rm caddy:2 caddy hash-password --plaintext '...'`
+# (or `caddy hash-password` on the front machine). The admin (auth_user, default "sam") can add
+# songs and start the GPU box freely; the guest can play but not add songs, and may start the
+# box guest_starts_per_day times a day.
+auth_hash  = "<bcrypt hash of the admin password>"
+guest_hash = "<bcrypt hash of the guest password>"
+
+# Optional. Uncomment to change a default from variables.tf.
+# instance_type        = "g4dn.xlarge"
+# availability_zone    = "us-east-1f"
+# max_minutes          = 480
+# guest_user           = "guest"
+# guest_starts_per_day = 3
+# idle_minutes         = 30

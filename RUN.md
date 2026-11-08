@@ -21,7 +21,11 @@ command that produced it, is in results.md.
 
 Run one engine at a time. One engine takes about 3 GB of GPU memory at the default settings
 (6 GB without the cache), and two at once fight over it and crawl. Closing games and other
-GPU-heavy apps first avoids the same problem.
+GPU-heavy apps first avoids the same problem. The engine enforces this itself: it takes a lock
+slot in the temp folder (`cpp/include/pf/engine_lock.h`) and refuses to start while another
+engine holds it, with exit code 1 and a message. `--max-engines N` allows N at once (the
+deliberate two-engine test), `--max-engines 0` removes the limit. Engines in separate Docker
+containers do not see each other's slots. The lock cannot see other GPU apps; `nvidia-smi` can.
 
 ## 1. Python packages (in the .venv)
 
@@ -108,19 +112,48 @@ The engine's F1 should match the stream_sim row for the same song, stride and de
 ### Live piano roll
 
 ```powershell
-.venv\Scripts\python.exe ui\server.py test_audio\16k\<song>.wav
+.venv\Scripts\python.exe ui\server.py
 ```
 
-Open http://localhost:8000 and press Play. You hear the song and see its notes scroll about 1 s behind.
-The default is `--stride 16 --delay 16`. The button is there because browsers only allow sound after a click.
-Engine logs stay on this console. Ctrl+C quits.
+Open http://localhost:8000, pick a song and press Play. You hear the song and see its notes scroll about
+1 s behind. The default is `--stride 16 --delay 16`. The button is there because browsers only allow
+sound after a click. Engine logs stay on this console. Ctrl+C quits.
+
+Every open page is its own session: its own engine, song, notes and run folder
+(`runs\ui\session-N`). `--max-sessions` (default 2, what one T4 keeps up with) caps the engines
+running at once; a page past the cap sees "All 2 engine slots are in use". Closing a page stops its
+engine. This is the shape the cloud version uses: one engine per user, N per GPU.
+
+The song list is every `.wav` in `test_audio\16k` (`--songs DIR` for another folder; a wav on the
+command line is selected first). To add a song, drop any audio file the browser can play (wav, mp3,
+m4a, ogg, flac) on the page or click the drop box: the browser decodes it, mixes it to mono and
+resamples it to 16 kHz with the Web Audio API, then uploads it to the songs folder. The server only
+accepts 16 kHz mono wavs. The browser's resampler is not `py/prep_audio.py` (torchaudio), so for
+scored results convert the original with `prep_audio.py` instead; on the same 16 kHz file both agree
+to about 1e-3. Songs uploaded this way are what the cloud version will need anyway: audio handled in
+the browser, server storage behind it. With `--admin NAME` only that login (the `X-User` header the
+front's Caddy sets, step 11) gets the drop box and may upload; on your own PC leave it off.
 
 Looking back: every note of the session is kept, so scroll the wheel or drag the roll sideways to see
-earlier ones (arrow keys move 1 s, Home or "Back to live" returns to where the engine is). Pause (or
-Space) freezes the view and, for a file, the song; the engine itself is never paused and keeps going at
-real-time pace, so notes keep arriving while paused and a blue line marks where the engine is. "Back to
-live" after a pause skips the song forward to the engine. The time axis along the bottom is song time,
-and the header shows the view's position, how far behind the engine it is, and the note count.
+earlier ones (arrow keys move 1 s). Scrolling anchors the view on that spot, like a DAW: it stays put
+while the music's playhead (a blue line) travels across it, and Home or "Back to live" makes the view
+follow the music again (for a song, that skips it forward to where the engine is). There is no pause:
+Stop and Play do that for real (below), and scrolling covers looking at earlier notes. The time axis
+along the bottom is song time, and the header shows the view's position, how far behind the engine it
+is, and the note count.
+
+Play turns into Stop while the engine runs, for songs too: the engine stops reading, finishes the
+notes it has (no padding to the next 512 frames) and writes them, so a stopped run keeps its notes.
+Play again continues: the same song resumes from where it stopped (a new engine starts there with
+`--start-seconds`, so its first second has no history and may miss a note), the mic or a tab
+continues at the end of the previous capture, and the roll keeps everything. A different song or
+source, or "Clear", starts a fresh roll.
+After the engine finishes (or is stopped), "Replay" plays the notes on the page again from the start
+with the song; the engine is not run again, since the same audio and settings give the same notes.
+The button turns into "Stop replay" while it runs, and Play is disabled until the replay ends.
+With live input there is no recording, so the roll replays silently. "Download MIDI" saves the notes
+on the page as a standard MIDI file (format 0, one piano track, 120 bpm, same note times and
+velocities as the engine's notes.csv), at any point from the first note on.
 
 For whatever the PC is playing (Spotify, YouTube), or the mic:
 
@@ -326,6 +359,80 @@ by hand. Schema: `eval/sql/schema.sql`, three tables (`runs`, `timings`, `scores
 - The database is committed (about 60 KB). `import` rebuilds it from the run folders and results.md
   if it is ever lost, except the batch note counts and array check results of scores that only
   `score_engine.py` wrote.
+
+## 11. Deploy: a GPU box behind an always-on front, for a couple of users
+
+Two machines, both made by `infra/deploy/`:
+
+- **GPU box**: spot `g4dn.xlarge` (persistent request: a reclaim stops it, AWS restarts it when
+  capacity returns), running the service image (`docker build --target service`: the engine plus
+  `ui/server.py`, one engine per connected page, two at once). It has no public ports except SSH
+  from one address; its page and event ports (8000, 8001) answer only the front. It stops itself
+  after `max_minutes` (default 8 hours, about $2 of T4 time).
+- **Front**: a `t4g.nano` (about $3 a month) that holds the fixed address and runs Caddy as a plain
+  binary (no Docker: 512 MB is not enough to install it): HTTPS with a Let's Encrypt certificate
+  for `<ip-with-dashes>.sslip.io`, two logins, and a proxy to the GPU box over the VPC. When the
+  box is stopped or reclaimed, the proxy fails and Caddy serves `deploy/front/offline.html`
+  ("the piano engine is offline right now") with a **Start the engine** button instead of going dark.
+- **Two logins** (Caddy basic auth; the login name reaches the service as `X-User`, set by Caddy so
+  a client cannot forge it): the admin (`auth_user`, default `sam`) can add songs and start the GPU
+  box as often as needed; the guest (`guest_user`, default `guest`) can play and transcribe, sees
+  no drop box (and the server answers 403 to an upload anyway), and may start the box
+  `guest_starts_per_day` times a day (default 3, UTC days, counted in `/opt/pianofi/data/starts.json`
+  on the front). The button is `deploy/front/start.py` behind Caddy at `/start`; it calls
+  `aws ec2 start-instances` with the front's IAM role, which allows exactly that one instance
+  (`infra/deploy/iam.tf`).
+- **Idle stop**: `deploy/run.sh` installs a systemd timer on the GPU box (`deploy/idle_stop.sh`,
+  once a minute, reads `/status` from the service) that shuts the machine down after `IDLE_MINUTES`
+  (default 30) with no engine running. A stopped box costs only its disk; the Start button brings it
+  back. The old `max_minutes` cap still applies to the first boot.
+
+Before the first deploy: `infra/deploy/terraform.tfvars` with `my_ip_cidr`, `auth_hash` and
+`guest_hash` (copy the example; a hash comes from `docker run --rm caddy:2 caddy hash-password
+--plaintext '...'`, or `caddy hash-password` on the front), `terraform -chdir=infra/deploy init`, the
+SSH key from step 9, and `aws sso login --profile pianofi-live`.
+
+```powershell
+terraform -chdir=infra/deploy apply
+tar -czf runs\pf-deploy.tgz --exclude cpp/build Dockerfile .dockerignore cpp ui deploy models
+scp -i ~\.ssh\pianofi_live runs\pf-deploy.tgz ec2-user@<gpu_public_ip>:pf/
+scp -i ~\.ssh\pianofi_live test_audio\16k\*.wav ec2-user@<gpu_public_ip>:pf/songs/
+ssh -i ~\.ssh\pianofi_live ec2-user@<gpu_public_ip> "cd pf && tar -xzf pf-deploy.tgz && sed -i 's/\r$//' deploy/*.sh && chmod +x deploy/run.sh && ./deploy/run.sh"
+terraform -chdir=infra/deploy destroy
+```
+
+- `<gpu_public_ip>` is a Terraform output (it changes when the box is replaced; `aws ec2
+  describe-instances` has the current one; it also changes every time the box is stopped and
+  started, the private address and the hostname do not). The front needs nothing shipped: its
+  first boot installs Caddy and the files from `deploy/front/` (Caddyfile, offline page, `start.py`,
+  `install.sh`) and writes `/opt/pianofi/env` (logins, the GPU box's address and id). A change to
+  those files is shipped by hand, not by replacing the machine (each replacement costs a
+  certificate, and Let's Encrypt allows 5 a week per name):
+  `scp -i ~\.ssh\pianofi_live -r deploy\front ec2-user@<public_ip>:` then
+  `ssh ... "sudo bash front/install.sh"`. A change that only touches the first-boot script makes
+  Terraform stop and start the front (about 1 minute; the address and certificate survive).
+- On the GPU box, `ADMIN=sam IDLE_MINUTES=30 ./deploy/run.sh` are the defaults; `IDLE_MINUTES=0`
+  turns the idle stop off.
+- The first build on the box takes a few minutes (CUDA image, ONNX Runtime, compile, `pf_tests`);
+  after that `run.sh` restarts in seconds. `run.sh SITE USER HASH` is the old single-box form
+  (Caddy on the GPU box itself).
+- The page is `https://<site>`, user `sam` or `guest`, the passwords you hashed. The browser's mic
+  and tab audio need HTTPS, which is why Caddy is there.
+- Lag through the cloud is measured by the page: "lag (end to end)" is from the sample leaving the
+  browser to its note arriving back. The engine's own lag is in `runs/ui/session-N/metrics.json`
+  on the box.
+- Always `destroy` when done, and check that the address is released (an unattached Elastic IP
+  costs money) and that no spot request is left open:
+  `aws ec2 describe-spot-instance-requests --filters Name=state,Values=open,active`.
+- Zones on this account, 2026-11-07: us-east-1d's default subnet routes through a NAT gateway (no
+  public path in or out, the box is unreachable); 1a, 1b, 1c, 1e, 1f route through the internet
+  gateway. us-east-1b had no spot capacity; 1a reclaimed a one-time machine after 7 hours.
+- Replacing the GPU box takes 7 minutes (the old one takes about 6.5 to terminate). If `apply` is
+  cut off while the new one is being created, the machine exists but is not in the state:
+  `terraform -chdir=infra/deploy import aws_instance.gpu <id>` and apply again.
+- The GPU box's security group keeps its original description: changing it would replace the
+  group while it is attached. Its rules are all inline (a separate `aws_security_group_rule`
+  next to inline rules gets stripped on every apply).
 
 ## Next steps (not built yet)
 
