@@ -2,8 +2,11 @@
 
 Play any song and watch its piano cover appear as notes on a scrolling piano roll, about one second behind the music. A C++ engine streams audio through a piano-cover transcription model in real time, from a file, a microphone, or whatever your PC is playing.
 
-**Live:** https://54-174-0-35.sslip.io (login required; the GPU machine starts on demand)
+**Live:** https://54-174-0-35.sslip.io
+&nbsp;·&nbsp; log in as `guest` with password `NJNAvBYK5pBKXd6T`
 &nbsp;·&nbsp; [Report a bug](https://github.com/samxu0425-coder/pianofi-live/issues)
+
+If the page says the engine is offline, press **Start the engine** and the GPU machine boots in about 20 s. The guest login gets three starts a day and cannot add songs.
 
 ## Contents
 
