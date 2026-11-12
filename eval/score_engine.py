@@ -149,6 +149,8 @@ def main() -> int:
     if metrics.get("delay_frames", 0) > 0:  # older runs have no delay field
         stride += f" + delay {metrics['delay_frames'] * 16} ms"
     device = metrics["provider"]
+    if metrics.get("precision") == "fp16":  # half-precision graphs (--fp16)
+        device += " FP16"
     if metrics.get("ring_buffer") == "spsc":  # older runs have no ring_buffer field: they used the mutex
         device += ", spsc ring"
     row = (

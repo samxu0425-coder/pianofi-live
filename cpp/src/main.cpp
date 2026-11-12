@@ -20,9 +20,13 @@
 //   --normalize       automatic input level: scale the audio so its loudest recent peak is
 //   --no-normalize    full scale. On by default for mic and loopback, off for wav files.
 //   --cpu             use the CPU even if CUDA is available (default: try CUDA)
+//   --fp16            half precision: load frame_fp16.onnx and time_fp16.onnx (py/export_fp16.py).
+//                     GPU only, and not exact: outputs move away from batch
 //   --threads N       ONNX Runtime intra-op threads
 //   --out DIR         where notes.csv and metrics.json go (default: runs/<timestamp>)
 //   --dump            also write raw model outputs + mel to --out for the Python checks
+//   --profile         also write ONNX Runtime's per-node timing profile of both graphs to --out
+//                     (ort_frame_*.json, ort_time_*.json; read with eval/ort_profile.py). Slows the run a little
 //   --max-seconds X   only use the first X seconds of the wav; live input stops after X
 //   --start-seconds X skip the first X seconds of the wav (resume a stopped song; times count from X)
 //                     (default: live input runs until Ctrl+C)
@@ -162,7 +166,7 @@ int usage() {
     std::fprintf(stderr,
                  "usage: pianofi_live (--wav FILE | --input mic|loopback|stdin [--device NAME] | --list-devices) [--models DIR] [--style NAME] [--stride N] [--delay N] [--heads a|b]\n"
                  "                    [--no-cache] [--fast] [--events] [--normalize | --no-normalize] [--bounded-memory]\n"
-                 "                    [--cpu] [--threads N] [--out DIR] [--dump] [--max-seconds X] [--start-seconds X] [--max-engines N]\n");
+                 "                    [--cpu] [--fp16] [--threads N] [--out DIR] [--dump] [--profile] [--max-seconds X] [--start-seconds X] [--max-engines N]\n");
     return 2;
 }
 
@@ -175,7 +179,7 @@ int main(int argc, char** argv) {
     std::string wav_path, input_name = "file", models = "models", style = "level2", out_dir;
     pf::EngineConfig cfg;
     pf::ModelOptions mopt;
-    bool try_cuda = true, dump = false;
+    bool try_cuda = true, dump = false, fp16 = false, profile = false;
     int normalize = -1;  // -1 = not given: on for live input, off for files
     double max_seconds = 0, start_seconds = 0;
     int max_engines = 1;
@@ -202,9 +206,11 @@ int main(int argc, char** argv) {
             else if (a == "--no-normalize") normalize = 0;
             else if (a == "--bounded-memory") cfg.bounded_memory = true;
             else if (a == "--cpu") try_cuda = false;
+            else if (a == "--fp16") fp16 = true;
             else if (a == "--threads") mopt.threads = std::stoi(next());
             else if (a == "--out") out_dir = next();
             else if (a == "--dump") dump = true;
+            else if (a == "--profile") profile = true;
             else if (a == "--max-seconds") max_seconds = std::stod(next());
             else if (a == "--start-seconds") start_seconds = std::stod(next());
             else if (a == "--max-engines") max_engines = std::stoi(next());
@@ -239,6 +245,7 @@ int main(int argc, char** argv) {
         pf::EngineLock lock(max_engines);  // before the GPU is touched; held until this engine exits
         fs::create_directories(out_dir);
         if (dump) cfg.dump_dir = out_dir;
+        if (profile) mopt.profile = out_dir + "/ort";
 
         pf::Wav wav;
         if (!live) {
@@ -256,8 +263,8 @@ int main(int argc, char** argv) {
         }
         const auto sv = read_floats(models + "/sv_" + style + ".bin", pf::kStyleDim);
 
-        mopt.frame_path = models + "/frame.onnx";
-        mopt.time_path = models + "/time.onnx";
+        mopt.frame_path = models + (fp16 ? "/frame_fp16.onnx" : "/frame.onnx");
+        mopt.time_path = models + (fp16 ? "/time_fp16.onnx" : "/time.onnx");
         std::unique_ptr<pf::Model> model;
         if (try_cuda) {
             mopt.cuda = true;
@@ -275,9 +282,9 @@ int main(int argc, char** argv) {
         char length[48];
         if (live && cfg.max_seconds <= 0) std::snprintf(length, sizeof length, "until stopped");
         else std::snprintf(length, sizeof length, "%.1f s", live ? cfg.max_seconds : double(wav.mono.size()) / 16000);
-        std::fprintf(log, "%s: %s, provider %s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s%s\n",
+        std::fprintf(log, "%s: %s, provider %s%s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s%s\n",
                      live ? input_name.c_str() : wav_path.c_str(), length,
-                     model->provider(), cfg.stride, cfg.stride * 16.0,
+                     model->provider(), fp16 ? " FP16" : "", cfg.stride, cfg.stride * 16.0,
                      cfg.delay, cfg.delay * 16.0, cfg.heads, cfg.cache ? "cached" : "no cache",
                      cfg.realtime ? "real time" : "fast", cfg.normalize ? ", auto level" : "");
 
@@ -319,6 +326,7 @@ int main(int argc, char** argv) {
             f << "  \"capture_device\": \"" << json_escape(mx.capture_device) << "\",\n";
             f << "  \"wav\": \"" << fs::path(wav_path).filename().string() << "\",\n";
             f << "  \"provider\": \"" << mx.provider << "\",\n";
+            f << "  \"precision\": \"" << (fp16 ? "fp16" : "fp32") << "\",\n";
             f << "  \"stride_frames\": " << mx.stride << ",\n";
             f << "  \"delay_frames\": " << mx.delay << ",\n";
 #ifdef PF_USE_SPSC

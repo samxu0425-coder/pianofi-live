@@ -26,6 +26,9 @@ struct ModelOptions {
     std::string time_path;
     bool cuda = false;
     int threads = 0;  // 0 = ONNX Runtime default
+    // Not empty: ONNX Runtime writes a per-node timing profile for each graph when the
+    // model is destroyed, to <profile>_frame_<time>.json and <profile>_time_<time>.json.
+    std::string profile;
 };
 
 class Model {

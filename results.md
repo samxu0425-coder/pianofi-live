@@ -90,6 +90,10 @@ the pass time changed.
 | 256 | 512 | RTX 4070 | 1 | 0.9286 | 0.9286 | 771 | 771 | 59.9 | 59.9 | 0 |
 | 512 | 0 | RTX 4070 | 1 | 0.9179 | 0.9179 | 754 | 754 | 65.5 | 65.5 | 0 |
 | 8192 | 0 | RTX 4070 | 1 | 1.0000 | 1.0000 | 756 | 756 | 203.4 | 203.4 | 0 |
+| 2026-11-12 16:00 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 169.8 | 239.9 | not measured | not measured | 0.022 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --out runs/check512` |
+| 2026-11-12 16:02 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | CUDA FP16, spsc ring | 8192 ms | b | yes | 0.9967 | 0.9993 | 0.9980 | 92.9 | 155.2 | not measured | not measured | 0.012 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump --fp16 --out runs/fp16_check512` |
+| 2026-11-12 16:03 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 41.1 | 45.3 | 992 | 1114 | 0.177 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --out runs/fp32_s16_d16_rt` |
+| 2026-11-12 16:05 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9131 | 0.9312 | 0.9221 | 26.9 | 30.0 | 979 | 1100 | 0.115 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump --fp16 --out runs/fp16_s16_d16_rt` |
 
 | when | song | device | stride | heads | cache | P | R | F1 | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | RTF | overruns | decoder | machine | command |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -453,3 +457,209 @@ updated in place in 60 s. Checked from this PC through the front (`site_check.py
 | the front after Terraform's stop/start for the new first-boot script | modified in 43 s, site answering (401 without login) 1 s after `apply` returned, certificate kept |
 | idle stop (30 min with no engine) | the box started at 01:52:19 UTC (Start click), nobody played, `aws ec2 describe-instances` showed it `stopping` at 02:26:04 UTC (a once-a-minute poll): 33 min 45 s after the start, i.e. 30 idle minutes counted from the first timer tick plus boot and shutdown time |
 
+## GPU memory per engine, 2026-11-12 13:04
+
+Measured with the graphs as they were exported until 16:00 that day, where velocity is an ArgMax node (see "Velocity
+ArgMax moved to the GPU" below for the current graphs). To reproduce: `.venv\Scripts\python.exe py\export_onnx.py --wav <song> --argmax --out-dir models\argmax`,
+`.venv\Scripts\python.exe py\export_fp16.py --dir models\argmax`, and add `--models models\argmax` to the engine commands.
+Their run folders were reused afterwards, so the engine table above holds the newer rows.
+
+Command: `python eval\gpu_memory.py test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10
+
+686610__seth_makes_sounds__bubbglegum-pop-song.wav, file input, `--fast`, one engine at a time. GPU memory is the peak rise in `nvidia-smi` memory.used during the run, sampled every 0.5 s, so short spikes can be missed.
+
+| settings | GPU memory MB | pass p50 ms | pass max ms |
+|---|---|---|---|
+| stride 256 ms + delay 256 ms, cached | 3065 | 53.7 | 91 |
+| stride 256 ms + delay 256 ms, cached, FP16 | 2455 | 40.5 | 63 |
+| stride 64 ms, cached | 2875 | 50.4 | 75 |
+| stride 256 ms, no cache | 5980 | 163.8 | 204 |
+| stride 8192 ms (batch windows) | 6181 | 175.1 | 254 |
+
+## FP16 (half precision) on the CUDA provider, 2026-11-12
+
+Measured with the graphs as they were exported until 16:00 that day, where velocity is an ArgMax node (see "Velocity
+ArgMax moved to the GPU" below for the current graphs). To reproduce: `.venv\Scripts\python.exe py\export_onnx.py --wav <song> --argmax --out-dir models\argmax`,
+`.venv\Scripts\python.exe py\export_fp16.py --dir models\argmax`, and add `--models models\argmax` to the engine commands.
+Their run folders were reused afterwards, so the engine table above holds the newer rows.
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10. ONNX Runtime 1.20.1, CUDA provider.
+
+`py\export_fp16.py` writes `models/frame_fp16.onnx` and `models/time_fp16.onnx`; the engine loads them with `--fp16`.
+FP32 runs were repeated the same day. Scored rows are also in the engine table above (2026-11-12). Song:
+`686610__seth_makes_sounds__bubbglegum-pop-song.wav` for batch windows, its first 60 s for the rest.
+Commands are `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\<song> ...` with the options shown; FP16 adds `--fp16`.
+
+| setting | precision | F1 vs batch | notes (batch) | frame model p50 ms | time model p50 ms | pass p50 ms | pass p99 ms | options, `--out` |
+|---|---|---|---|---|---|---|---|---|
+| stride 8192 ms (batch windows), `--fast` | FP32 | 1.0000 | 1495 (1495) | 141.9 | 36.4 | 181.4 | 246.1 | `--stride 512 --fast --dump --out runs\check512` |
+| same | FP16 | 0.9980 | 1499 (1495) | 73.9 | 24.9 | 100.2 | 160.2 | `... --fp16 --out runs\fp16_check512` |
+| stride 256 ms + delay 256 ms, `--fast` | FP32 | not measured | 769 | 16.2 | 38.2 | 54.3 | 70.1 | `--stride 16 --delay 16 --fast --out runs\fp32_s16_d16_fast` |
+| same | FP16 | not measured | 771 | 11.0 | 28.7 | 43.4 | 54.8 | `... --fp16 --out runs\fp16_s16_d16_fast` |
+| stride 256 ms + delay 256 ms, real time | FP32 | 0.9233 | 769 (756) | 12.7 | 40.4 | 62.4 | 83.3 | `--stride 16 --delay 16 --dump --out runs\fp32_s16_d16_rt` |
+| same | FP16 | 0.9221 | 771 (756) | 27.8 | 31.9 | 58.3 | 68.2 | `... --fp16 --out runs\fp16_s16_d16_rt` |
+| same, second run | FP32 | not measured | 769 | 12.9 | 37.8 | 57.1 | 71.0 | `--stride 16 --delay 16 --out runs\fp32_s16_d16_rt2` |
+| same, second run | FP16 | not measured | 771 | 26.7 | 31.8 | 56.9 | 69.3 | `... --fp16 --out runs\fp16_s16_d16_rt2` |
+
+GPU memory (`eval\gpu_memory.py`, the table above this section, whole song, `--fast`): 3065 MB FP32, 2455 MB FP16 at
+stride 256 ms + delay 256 ms; pass p50 there was 53.7 ms FP32 and 40.5 ms FP16. Real-time frame lag p50: 1012 ms FP32, 1005 ms FP16.
+
+What this shows, on this GPU and provider:
+
+- Accuracy holds. At batch windows FP16 gives 1499 notes for batch's 1495 (F1 0.9980), and at the live setting F1
+  moves from 0.9233 to 0.9221. The array check fails with FP16 as expected (max diff 3.22e-02 against a 1e-3 limit),
+  so FP32 stays the reference and the exactness check stays on FP32.
+- Run flat out (`--fast`), FP16 is faster: the time model takes 28.7 ms instead of 38.2, a live pass 43.4 ms instead of
+  54.3 (20% less), and a batch-window pass 100.2 ms instead of 181.4 (45% less). GPU memory is 20% lower.
+- In real time the pass did not get faster (58.3 vs 62.4 ms, then 56.9 vs 57.1). The time model keeps its gain
+  (about 32 ms vs 38 to 40), but the frame model takes about 27 ms in FP16 against about 13 in FP32, in both runs.
+  It only happens when the GPU sits idle between passes; run flat out the FP16 frame model is the faster one
+  (11.0 vs 16.2 ms). The cause is not measured yet.
+
+### Why two layers stay in FP32
+
+With every node in FP16 all outputs were NaN (0 notes). `py\attention_range.py runs\check512 runs\prettifun-s16-d16`
+(FP32 on the CPU, 36 windows of two songs) gives the largest attention score, query x key before the divide by 8, per layer:
+
+| layer | largest score | share of the FP16 limit (65504) |
+|---|---|---|
+| `/layers_freq.0/self_attention` (frame model, first encoder layer) | 394824 | 602.7% |
+| `/layers_freq.1/self_attention` | 118 | 0.2% |
+| `/layers_freq.2/self_attention` | 100 | 0.2% |
+| `/layer_zero_freq/encoder_attention` | 68 | 0.1% |
+| `/layers_freq.0/self_attention_1` | 67 | 0.1% |
+| `/layers_freq.0/encoder_attention` | 75 | 0.1% |
+| `/layers_freq.1/self_attention_1` | 95 | 0.1% |
+| `/layers_freq.1/encoder_attention` | 159 | 0.2% |
+| `/layers_time.0/self_attention` (time model, first layer) | 1848219 | 2821.5% |
+| `/layers_time.1/self_attention` | 243 | 0.4% |
+| `/layers_time.2/self_attention` | 256 | 0.4% |
+
+Two layers overflow, both the first of their stack. Dividing before the product instead of after would not save
+the time model's layer (1848219 / 8 is still 3.5 times the limit), so `export_fp16.py` keeps the score MatMul, Div and
+Softmax of those two layers in FP32 and everything else in FP16.
+
+A first version kept the scores of all 11 layers in FP32 (`py\export_fp16.py --all-layers` still makes it). It was
+slower and no smaller: time model 34.5 to 35.7 ms, `--fast` live pass 50.5 ms, batch-window pass 125.4 ms, 3041 MB,
+F1 0.9990 at batch windows and 0.9227 at the live setting.
+
+Not measured: the T4, and more than one engine per GPU.
+
+## Profile of a pass (ONNX Runtime per-node profile), 2026-11-12
+
+Measured with the graphs as they were exported until 16:00 that day, where velocity is an ArgMax node (see "Velocity
+ArgMax moved to the GPU" below for the current graphs). To reproduce: `.venv\Scripts\python.exe py\export_onnx.py --wav <song> --argmax --out-dir models\argmax`,
+`.venv\Scripts\python.exe py\export_fp16.py --dir models\argmax`, and add `--models models\argmax` to the engine commands.
+Their run folders were reused afterwards, so the engine table above holds the newer rows.
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF (20 threads), NVIDIA GeForce RTX 4070, Windows 10. ONNX Runtime 1.20.1, CUDA provider.
+
+Question: why does the FP16 frame model take about 27 ms in real time when FP32 takes 13 and FP16 run flat out takes 11?
+
+Runs: `cpp\build\Release\pianofi_live.exe --wav test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --profile --out runs\prof_<precision>_<rt or fast>`
+(plus `--fp16` and `--fast` as named), read with `.venv\Scripts\python.exe eval\ort_profile.py runs\prof_fp32_rt runs\prof_fp16_rt runs\prof_fp32_fast runs\prof_fp16_fast`.
+Profiling itself slows a pass (real-time pass p50 76.5 ms FP32 and 68.1 ms FP16 with it on), so these show where the time goes, not how much.
+
+Frame graph, median over 290 runs of the graph:
+
+| run | median run ms | all CUDA nodes ms | all CPU nodes ms | of which `/ArgMax` ms (p10 / p50 / p90) |
+|---|---|---|---|---|
+| FP32, real time | 30.7 | 8.35 (260 nodes) | 19.39 (40 nodes) | 0.08 / 18.65 / 26.98 |
+| FP16, real time | 31.1 | 8.32 (263 nodes) | 19.25 (41 nodes) | 0.08 / 18.41 / 26.92 |
+| FP32, `--fast` | 19.0 | 4.95 | 9.85 | 0.08 / 9.35 / 17.47 |
+| FP16, `--fast` | 17.8 | 8.25 | 6.11 | 0.07 / 5.25 / 14.97 |
+
+What it shows:
+
+- One node is most of the frame model's time: `/ArgMax`, which picks the velocity for the per-frame heads. ONNX Runtime
+  runs it on the CPU, not the GPU (so does the same node in the time graph), and splits its 16 x 88 x 128 input over
+  the CPU thread pool. The work itself takes 0.05 to 0.08 ms when it goes well; the median is 5 to 19 ms. Every other
+  node has a median under 0.2 ms.
+- It is not an FP16 problem. With profiling on, FP32 and FP16 are equally slow there. FP16 only landed on the slow
+  side more often in the unprofiled runs.
+- The likely cause is the thread pool, not the arithmetic: the time goes into handing 13 small blocks to pool
+  threads and waiting for them, and it is worst in real time, when the threads have gone to sleep between passes.
+  The wake-up itself was not measured; the test below is the evidence.
+
+Test: the same real-time runs with one ONNX Runtime thread (`--threads 1`, no profiling), so `/ArgMax` runs on the calling thread:
+
+| run | frame model p50 / p99 ms | time model p50 ms | pass p50 / p99 ms | notes | options, `--out` |
+|---|---|---|---|---|---|
+| FP32, default threads | 12.9 / 31.3 | 37.8 | 57.1 / 71.0 | 769 | `--stride 16 --delay 16 --out runs\fp32_s16_d16_rt2` |
+| FP32, `--threads 1` | 5.1 / 5.6 | 43.5 | 48.7 / 51.2 | 769 | `... --threads 1 --out runs\fp32_s16_d16_rt_t1` |
+| FP16, default threads | 26.7 / 31.2 | 31.8 | 56.9 / 69.3 | 771 | `... --fp16 --out runs\fp16_s16_d16_rt2` |
+| FP16, `--threads 1` | 4.6 / 5.4 | 30.9 | 35.6 / 40.4 | 771 | `... --fp16 --threads 1 --out runs\fp16_s16_d16_rt_t1` |
+
+With one thread the frame model takes about 5 ms with almost no spread, the note counts are unchanged, and the
+real-time pass drops from 57.1 to 48.7 ms in FP32 and from 56.9 to 35.6 ms in FP16. The FP32 time model is slower
+with one thread (43.5 vs 37.8 ms): its own ArgMax is 32 times bigger (88 x 512 x 128) and does use the threads.
+F1 for the `--threads 1` runs: not measured. The engine's default is unchanged (ONNX Runtime's default thread count).
+
+## GPU memory per engine, 2026-11-12 16:10
+
+Command: `python eval\gpu_memory.py test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav`
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10
+
+686610__seth_makes_sounds__bubbglegum-pop-song.wav, file input, `--fast`, one engine at a time. GPU memory is the peak rise in `nvidia-smi` memory.used during the run, sampled every 0.5 s, so short spikes can be missed.
+
+| settings | GPU memory MB | pass p50 ms | pass max ms |
+|---|---|---|---|
+| stride 256 ms + delay 256 ms, cached | 3048 | 37.6 | 54 |
+| stride 256 ms + delay 256 ms, cached, FP16 | 2455 | 22.7 | 35 |
+| stride 64 ms, cached | 3077 | 35.6 | 48 |
+| stride 256 ms, no cache | 6145 | 164.0 | 190 |
+| stride 8192 ms (batch windows) | 6183 | 174.6 | 243 |
+
+## Velocity ArgMax moved to the GPU (TopK), 2026-11-12 16:00
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10. ONNX Runtime 1.20.1, CUDA provider.
+
+The profile above found that ONNX Runtime ran the velocity ArgMax of both graphs on the CPU, where it waited on the
+CPU thread pool. `py\export_onnx.py` now writes that pick as top-1 (`torch.topk`, ONNX TopK), which the CUDA provider
+runs on the GPU. Same result by definition (lowest index among equal values), and every check still passes:
+`export_onnx.py` All checks passed (velocity mismatch 0.0000%), `check_mel.py` PASSED, `pf_tests` ALL TESTS PASSED, and
+at stride 512 array check PASSED (max diff 2.88e-04, the same as before), decoder check PASSED, F1 = 1.0000.
+A profile of the new graphs (`--profile --out runs\prof_topk_fp32_rt`) shows no CPU node left in the time graph and
+0.46 ms of CPU nodes (shape arithmetic) in the frame graph.
+
+Real time, stride 256 ms + delay 256 ms, first 60 s of `686610__seth_makes_sounds__bubbglegum-pop-song.wav`. "Before" is the
+ArgMax graphs run again in the same session (`--models models\argmax`). Commands: `cpp\build\Release\pianofi_live.exe --wav
+test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16` plus the options shown.
+
+| graphs | precision | F1 vs batch | notes (batch) | frame model p50 / p99 ms | time model p50 ms | pass p50 / p99 ms | frame lag p50 / p99 ms | GPU memory MB | options, `--out` |
+|---|---|---|---|---|---|---|---|---|---|
+| ArgMax (before) | FP32 | not measured (0.9233 earlier that day) | 769 | not recorded here | not recorded here | 63.2 / 75.0 | not recorded here | 3065 | `--models models\argmax --out runs\argmax_fp32_s16_d16_rt` |
+| ArgMax (before) | FP16 | not measured (0.9221 earlier that day) | 771 | not recorded here | not recorded here | 58.1 / 70.3 | not recorded here | 2455 | `--models models\argmax --fp16 --out runs\argmax_fp16_s16_d16_rt` |
+| TopK | FP32 | 0.9233 | 769 (756) | 4.7 / 5.6 | 36.2 | 41.1 / 45.3 | 992 / 1114 | 3048 | `--dump --out runs\fp32_s16_d16_rt` |
+| TopK, second run | FP32 | not measured | 769 | 4.8 / 5.4 | 36.4 | 41.2 / 45.8 | 993 / 1114 | | `--out runs\fp32_s16_d16_rt2` |
+| TopK | FP16 | 0.9221 | 771 (756) | 4.3 / 4.8 | 22.7 | 26.9 / 30.0 | 979 / 1100 | 2455 | `--fp16 --dump --out runs\fp16_s16_d16_rt` |
+| TopK, second run | FP16 | not measured | 771 | 4.4 / 5.0 | 22.7 | 27.0 / 30.2 | 979 / 1100 | | `--fp16 --out runs\fp16_s16_d16_rt2` |
+
+"Not recorded here": the numbers are in each run's `metrics.json`. GPU memory is from `eval\gpu_memory.py` (whole song, `--fast`):
+the 13:04 table for the ArgMax graphs, the 16:10 table for TopK.
+
+Other settings on the TopK graphs:
+
+| setting | precision | F1 vs batch | frame model p50 ms | time model p50 ms | pass p50 / p99 ms | options, `--out` |
+|---|---|---|---|---|---|---|
+| stride 8192 ms (batch windows), whole song, `--fast` | FP32 | 1.0000 (1495 notes, batch 1495) | 134.8 | 33.9 | 169.8 / 239.9 | `--stride 512 --fast --dump --out runs\check512` |
+| same | FP16 | 0.9980 (1499 notes) | 71.2 | 20.8 | 92.9 / 155.2 | `--stride 512 --fast --dump --fp16 --out runs\fp16_check512` |
+| stride 256 ms + delay 256 ms, `--fast` | FP32 | not measured | 3.9 | 34.2 | 38.1 / 40.7 | `--stride 16 --delay 16 --fast --out runs\fp32_s16_d16_fast` |
+| same | FP16 | not measured | 2.5 | 20.7 | 23.2 / 25.5 | `--stride 16 --delay 16 --fast --fp16 --out runs\fp16_s16_d16_fast` |
+
+What this shows:
+
+- Moving one node took the real-time pass from 63.2 to 41.1 ms in FP32 (35% less) with identical notes, and the p99
+  from 75.0 to 45.3 ms. Nothing about the model's arithmetic changed; the exactness check gives the same max diff.
+- FP16 now pays off in real time too: 26.9 ms a pass against 41.1 for FP32 (35% less), for F1 0.9221 against 0.9233.
+  Its time model takes 22.7 ms instead of 36.2. With the ArgMax graphs its time model was about 32 ms: there the
+  velocity scores were also copied to the CPU and converted to FP32 before the ArgMax, which is gone now.
+- Both together: 63.2 ms to 26.9 ms a pass (57% less) and 3065 MB to 2455 MB (20% less), at a cost of 0.0012 F1.
+- Lag moved by about 30 ms (frame lag p50 1012 ms in the morning's FP32 run, 992 ms now, 979 ms with FP16), because
+  lag is set by the model's lookahead, the stride and the delay, not by compute. What the faster pass buys is
+  headroom: more engines per GPU or a shorter stride. Neither is measured yet.
+
+Not measured: the T4, more than one engine per GPU, CPU-only runs with the new graphs.

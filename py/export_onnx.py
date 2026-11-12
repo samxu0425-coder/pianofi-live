@@ -110,7 +110,7 @@ class FrameModel(nn.Module):
         onset_a = torch.sigmoid(dec.fc_onset_freq(h).squeeze(-1))
         offset_a = torch.sigmoid(dec.fc_offset_freq(h).squeeze(-1))
         mpe_a = torch.sigmoid(dec.fc_mpe_freq(h).squeeze(-1))
-        velocity_a = dec.fc_velocity_freq(h).argmax(-1)
+        velocity_a = argmax_last(dec.fc_velocity_freq(h))
         return h, onset_a, offset_a, mpe_a, velocity_a
 
 
@@ -131,8 +131,23 @@ class TimeModel(nn.Module):
         onset = torch.sigmoid(dec.fc_onset_time(x).squeeze(-1)).transpose(0, 1)
         offset = torch.sigmoid(dec.fc_offset_time(x).squeeze(-1)).transpose(0, 1)
         mpe = torch.sigmoid(dec.fc_mpe_time(x).squeeze(-1)).transpose(0, 1)
-        velocity = dec.fc_velocity_time(x).argmax(-1).transpose(0, 1)
+        velocity = argmax_last(dec.fc_velocity_time(x)).transpose(0, 1)
         return onset, offset, mpe, velocity
+
+
+USE_ARGMAX = False  # --argmax: export the plain ArgMax node, to compare against
+
+
+def argmax_last(x):
+    """x.argmax(-1), written as top-1 so it exports as TopK instead of ArgMax.
+
+    ONNX Runtime's CUDA provider runs TopK on the GPU but sends this ArgMax to the CPU, where
+    it waits on the CPU thread pool for 5 to 19 ms a pass (results.md, "Profile of a pass").
+    Same result: both return the lowest index among equal values.
+    """
+    if USE_ARGMAX:
+        return x.argmax(-1)
+    return torch.topk(x, 1, dim=-1).indices.squeeze(-1)
 
 
 def max_diff(a, b) -> float:
@@ -234,7 +249,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out-dir", type=Path, default=ROOT / "models")
     parser.add_argument("--tol", type=float, default=1e-3)
+    parser.add_argument("--argmax", action="store_true",
+                        help="export velocity as ArgMax (runs on the CPU in ONNX Runtime; the slow form, for comparison)")
     args = parser.parse_args()
+    global USE_ARGMAX
+    USE_ARGMAX = args.argmax
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)

@@ -6,10 +6,13 @@ What's here:
 |---|---|
 | `py/export_onnx.py` | Splits AMT-APC into `frame.onnx` (per-frame, cacheable) and `time.onnx` (window), checks both against the original model |
 | `py/prep_audio.py` | Converts songs to 16 kHz mono exactly like the batch pipeline |
+| `py/export_fp16.py` | Half-precision copies of both graphs for `--fp16` (attention scores kept in FP32) |
+| `py/attention_range.py` | Largest attention score per layer, which decides what stays FP32 in the FP16 graphs |
 | `py/check_mel.py` | C++ mel spectrogram vs a float64 run of the `Pipeline.wav2feature` transform |
 | `cpp/` | Engine: audio thread → ring buffer → mel → frame model + h cache → time model → note decoder |
 | `eval/score_engine.py` | F1 vs batch, decoder check vs `mpe2note`, appends a row to `results.md` and stores the run in `runs/results.db` |
 | `eval/results_db.py`, `eval/sql/` | SQLite results store: schema, import of every run, and the SQL reports behind the summary tables |
+| `eval/ort_profile.py` | Reads the per-node profiles of a `--profile` run: where a pass spends its time |
 | `eval/sweep.py` | Runs the grid (CPU/GPU, cache on/off, strides, A/B heads) and scores every run |
 | `eval/level_eval.py` | Automatic input level: quiet, tilted and dipping copies of each song, scored against batch |
 | `eval/memory_check.py` | Long sessions: dropping old history changes no notes and keeps memory bounded |
@@ -41,6 +44,9 @@ pip install onnx onnxruntime soundfile websockets
 ```
 
 `export_onnx.py` must print `All checks passed`. It also prints a first CPU timing for each graph.
+The velocity pick is exported as TopK, not ArgMax: ONNX Runtime's CUDA provider runs ArgMax on the CPU, which cost
+5 to 19 ms a pass (results.md, "Profile of a pass" and "Velocity ArgMax moved to the GPU"). `--argmax --out-dir models\argmax`
+writes the old form to compare against (`pianofi_live --models models\argmax`).
 
 ## 3. Build the C++ code
 
@@ -208,6 +214,35 @@ What to know about live audio:
 - `cpp\build\Release\capture_dump.exe loopback|mic SECONDS RATE OUT.wav` records what the capture
   path delivers, to check it against a file (RATE 0 = the device's own rate).
 - `cpp\third_party\miniaudio.h` is miniaudio v0.11.26 (public domain or MIT-0).
+
+### FP16 (half precision)
+
+```powershell
+pip install onnxconverter-common
+.venv\Scripts\python.exe py\export_fp16.py
+cpp\build\Release\pianofi_live.exe --wav test_audio\16k\<song>.wav --stride 16 --delay 16 --fp16
+```
+
+`export_fp16.py` makes `frame_fp16.onnx` and `time_fp16.onnx` from the FP32 graphs (weights and math in 16-bit
+floats, inputs and outputs still 32-bit), and `--fp16` loads them. GPU only. Two attention layers keep their
+scores in FP32: in FP16 they overflow and every output becomes NaN. `py\attention_range.py runs\<a --dump run>`
+prints the largest score per layer, which is where that list of two comes from; run it again if the model or
+the style changes. It is not exact, so with `--fp16` the stride 512 array check fails by design and F1 is
+slightly under 1; the step 4 checks stay on FP32. Numbers: results.md, "FP16 on the CUDA provider".
+
+### Where a pass spends its time
+
+```powershell
+cpp\build\Release\pianofi_live.exe --wav test_audio\16k\<song>.wav --stride 16 --delay 16 --profile --out runs\prof
+.venv\Scripts\python.exe eval\ort_profile.py runs\prof
+.venv\Scripts\python.exe eval\ort_profile.py runs\prof --graph time
+```
+
+`--profile` turns on ONNX Runtime's own per-node profile for both graphs (two JSON files in `--out`, over 100 MB
+for a minute of audio, so delete them afterwards). `ort_profile.py` prints the median time of one run of the graph,
+split into CUDA nodes, CPU nodes and copies, and the slowest nodes. Profiling slows the pass, so use it to see
+where time goes and measure the effect of a change without it. Times are what the CPU thread waited at each node:
+GPU work can show up at a later node than the one that caused it. What it found is in results.md, "Profile of a pass".
 
 ## 6. The lock-free ring buffer
 

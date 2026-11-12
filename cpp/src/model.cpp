@@ -53,8 +53,13 @@ Model::Model(const ModelOptions& opt) : impl_(std::make_unique<Impl>()) {
         so.AppendExecutionProvider_CUDA(cuda_opts);  // throws if the CUDA EP is missing
         impl_->cuda = true;
     }
-    impl_->frame = std::make_unique<Ort::Session>(impl_->env, to_ort_path(opt.frame_path).c_str(), so);
-    impl_->time = std::make_unique<Ort::Session>(impl_->env, to_ort_path(opt.time_path).c_str(), so);
+    Ort::SessionOptions frame_so = so.Clone(), time_so = so.Clone();
+    if (!opt.profile.empty()) {
+        frame_so.EnableProfiling(to_ort_path(opt.profile + "_frame").c_str());
+        time_so.EnableProfiling(to_ort_path(opt.profile + "_time").c_str());
+    }
+    impl_->frame = std::make_unique<Ort::Session>(impl_->env, to_ort_path(opt.frame_path).c_str(), frame_so);
+    impl_->time = std::make_unique<Ort::Session>(impl_->env, to_ort_path(opt.time_path).c_str(), time_so);
 }
 
 Model::~Model() = default;

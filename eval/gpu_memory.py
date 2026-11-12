@@ -32,6 +32,7 @@ from sweep import engine_env, find_exe
 
 SETTINGS = [
     ("stride 256 ms + delay 256 ms, cached", ["--stride", "16", "--delay", "16"]),
+    ("stride 256 ms + delay 256 ms, cached, FP16", ["--stride", "16", "--delay", "16", "--fp16"]),
     ("stride 64 ms, cached", ["--stride", "4"]),
     ("stride 256 ms, no cache", ["--stride", "16", "--no-cache"]),
     ("stride 8192 ms (batch windows)", ["--stride", "512"]),
