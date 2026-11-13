@@ -29,6 +29,12 @@ struct ModelOptions {
     // Not empty: ONNX Runtime writes a per-node timing profile for each graph when the
     // model is destroyed, to <profile>_frame_<time>.json and <profile>_time_<time>.json.
     std::string profile;
+    // TensorRT provider in front of CUDA (needs cuda = true and the TensorRT 10 DLLs on PATH).
+    // Engines are built on the first run and kept in trt_cache; a build takes minutes.
+    bool trt = false;
+    bool trt_fp16 = false;       // let TensorRT pick FP16 layers (it takes the FP32 graphs)
+    int trt_opt_frames = 80;     // the usual frame.onnx input length: stride + 64
+    std::string trt_cache;
 };
 
 class Model {

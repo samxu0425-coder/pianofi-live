@@ -22,6 +22,11 @@
 //   --cpu             use the CPU even if CUDA is available (default: try CUDA)
 //   --fp16            half precision: load frame_fp16.onnx and time_fp16.onnx (py/export_fp16.py).
 //                     GPU only, and not exact: outputs move away from batch
+//   --trt             TensorRT provider in front of CUDA (TensorRT 10 DLLs on PATH). Takes the FP32
+//                     graphs; with --fp16 TensorRT picks FP16 layers itself. The first run builds
+//                     the engines (minutes) and keeps them in <models>/trt_cache
+//   --mixed           with --trt: give TensorRT the mixed-precision graphs of py/export_fp16.py
+//                     (two attention layers stay in FP32) instead of the FP32 graphs
 //   --threads N       ONNX Runtime intra-op threads
 //   --out DIR         where notes.csv and metrics.json go (default: runs/<timestamp>)
 //   --dump            also write raw model outputs + mel to --out for the Python checks
@@ -179,7 +184,7 @@ int main(int argc, char** argv) {
     std::string wav_path, input_name = "file", models = "models", style = "level2", out_dir;
     pf::EngineConfig cfg;
     pf::ModelOptions mopt;
-    bool try_cuda = true, dump = false, fp16 = false, profile = false;
+    bool try_cuda = true, dump = false, fp16 = false, profile = false, trt = false, mixed = false;
     int normalize = -1;  // -1 = not given: on for live input, off for files
     double max_seconds = 0, start_seconds = 0;
     int max_engines = 1;
@@ -207,6 +212,8 @@ int main(int argc, char** argv) {
             else if (a == "--bounded-memory") cfg.bounded_memory = true;
             else if (a == "--cpu") try_cuda = false;
             else if (a == "--fp16") fp16 = true;
+            else if (a == "--trt") trt = true;
+            else if (a == "--mixed") mixed = true;
             else if (a == "--threads") mopt.threads = std::stoi(next());
             else if (a == "--out") out_dir = next();
             else if (a == "--dump") dump = true;
@@ -263,8 +270,16 @@ int main(int argc, char** argv) {
         }
         const auto sv = read_floats(models + "/sv_" + style + ".bin", pf::kStyleDim);
 
-        mopt.frame_path = models + (fp16 ? "/frame_fp16.onnx" : "/frame.onnx");
-        mopt.time_path = models + (fp16 ? "/time_fp16.onnx" : "/time.onnx");
+        const bool fp16_graphs = trt ? mixed : fp16;
+        mopt.frame_path = models + (fp16_graphs ? "/frame_fp16.onnx" : "/frame.onnx");
+        mopt.time_path = models + (fp16_graphs ? "/time_fp16.onnx" : "/time.onnx");
+        if (trt) {
+            mopt.trt = true;
+            mopt.trt_fp16 = fp16;
+            mopt.trt_opt_frames = cfg.stride + 2 * pf::kMargin;
+            mopt.trt_cache = models + "/trt_cache";
+            fs::create_directories(mopt.trt_cache);
+        }
         std::unique_ptr<pf::Model> model;
         if (try_cuda) {
             mopt.cuda = true;
@@ -284,7 +299,7 @@ int main(int argc, char** argv) {
         else std::snprintf(length, sizeof length, "%.1f s", live ? cfg.max_seconds : double(wav.mono.size()) / 16000);
         std::fprintf(log, "%s: %s, provider %s%s, stride %d frames (%.0f ms), delay %d frames (%.0f ms), heads %c, %s, %s%s\n",
                      live ? input_name.c_str() : wav_path.c_str(), length,
-                     model->provider(), fp16 ? " FP16" : "", cfg.stride, cfg.stride * 16.0,
+                     model->provider(), mixed ? " FP16 mixed" : fp16 ? " FP16" : "", cfg.stride, cfg.stride * 16.0,
                      cfg.delay, cfg.delay * 16.0, cfg.heads, cfg.cache ? "cached" : "no cache",
                      cfg.realtime ? "real time" : "fast", cfg.normalize ? ", auto level" : "");
 
@@ -326,7 +341,7 @@ int main(int argc, char** argv) {
             f << "  \"capture_device\": \"" << json_escape(mx.capture_device) << "\",\n";
             f << "  \"wav\": \"" << fs::path(wav_path).filename().string() << "\",\n";
             f << "  \"provider\": \"" << mx.provider << "\",\n";
-            f << "  \"precision\": \"" << (fp16 ? "fp16" : "fp32") << "\",\n";
+            f << "  \"precision\": \"" << ((fp16 || mixed) ? "fp16" : "fp32") << "\",\n";
             f << "  \"stride_frames\": " << mx.stride << ",\n";
             f << "  \"delay_frames\": " << mx.delay << ",\n";
 #ifdef PF_USE_SPSC

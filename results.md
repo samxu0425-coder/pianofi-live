@@ -116,6 +116,13 @@ the pass time changed.
 | 2026-11-12 20:23 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9143 | 0.9312 | 0.9227 | 134.5 | 199.9 | 1091 | 1214 | 0.602 | 0 | ok, four engines at once on one T4 | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --fp16 --dump --out runs/t4b_x4_fp16_2` |
 | 2026-11-12 20:23 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9143 | 0.9312 | 0.9227 | 101.7 | 191.0 | 1058 | 1180 | 0.475 | 0 | ok, four engines at once on one T4 | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --fp16 --dump --out runs/t4b_x4_fp16_3` |
 | 2026-11-12 20:23 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | CUDA FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9143 | 0.9312 | 0.9227 | 96.3 | 190.0 | 1056 | 1190 | 0.467 | 0 | ok, four engines at once on one T4 | AWS g4dn.xlarge spot (Tesla T4 15 GB, Xeon 8259CL 4 vCPUs), Amazon Linux 2023 ECS GPU image, in Docker | `docker run --rm --gpus all -v $PWD/models:/work/models -v $PWD/test_audio:/work/test_audio -v $PWD/runs:/work/runs pianofi-live --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --fp16 --dump --out runs/t4b_x4_fp16_4` |
+| 2026-11-12 21:42 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | TensorRT, spsc ring | 8192 ms | b | yes | 1.0000 | 1.0000 | 1.0000 | 124.3 | 141.9 | not measured | not measured | 0.016 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --trt --dump --out runs/trt_check512` |
+| 2026-11-12 21:42 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | TensorRT FP16, spsc ring | 8192 ms | b | yes | 0.9794 | 0.9866 | 0.9830 | 49.6 | 61.1 | not measured | not measured | 0.006 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --trt --fp16 --dump --out runs/trt_check512_fp16` |
+| 2026-11-12 21:42 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | TensorRT, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9155 | 0.9312 | 0.9233 | 32.3 | 34.1 | 983 | 1104 | 0.135 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --trt --dump --out runs/trt_fp32_s16_d16_rt` |
+| 2026-11-12 21:42 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | TensorRT FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9055 | 0.9378 | 0.9214 | 14.7 | 16.3 | 966 | 1087 | 0.060 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --trt --fp16 --dump --out runs/trt_fp16_s16_d16_rt` |
+| 2026-11-12 21:56 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | TensorRT FP16, spsc ring | 8192 ms | b | yes | 0.9960 | 0.9993 | 0.9977 | 56.6 | 66.5 | not measured | not measured | 0.007 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --trt --mixed --dump --out runs/trt_check512_mixed` |
+| 2026-11-12 21:56 | 686610__seth_makes_sounds__bubbglegum-pop-song.wav | TensorRT FP16, spsc ring | 8192 ms | b | yes | 0.9794 | 0.9846 | 0.9820 | 48.4 | 64.4 | not measured | not measured | 0.006 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --trt --mixed --fp16 --dump --out runs/trt_check512_mixed_fp16` |
+| 2026-11-12 21:59 | 686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav | TensorRT FP16, spsc ring | 256 ms + delay 256 ms | b | yes | 0.9132 | 0.9325 | 0.9228 | 15.8 | 19.3 | 967 | 1089 | 0.069 | 0 | ok | 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10 | `cpp\build\Release\pianofi_live.exe --wav test_audio/16k/686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --trt --mixed --dump --out runs/trt_mixed_s16_d16_rt` |
 
 | when | song | device | stride | heads | cache | P | R | F1 | pass p50 ms | pass p99 ms | lag p50 ms | lag p99 ms | RTF | overruns | decoder | machine | command |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -746,3 +753,54 @@ timer, which takes the GPU away from containers that are already running. A rebo
 then starts after systemd is set up. `run.sh` now starts the container last.
 
 Not measured: five or more engines, other strides, F1 of sessions through the site.
+
+## TensorRT provider, 2026-11-12 21:42
+
+Machine: 13th Gen Intel(R) Core(TM) i5-13600KF, NVIDIA GeForce RTX 4070, Windows 10. ONNX Runtime 1.20.1 with its
+TensorRT provider in front of the CUDA provider (`--trt`), TensorRT 10.4.0 (`tensorrt-cu12-libs` from pypi.nvidia.com,
+its `tensorrt_libs` folder on PATH). The first run of each variant builds the TensorRT engines (10 to 30 s here) and
+keeps them in `models\trt_cache`; the numbers below are from runs after the warm-up pass, as always. Every run is a
+row in the engine table above.
+
+Three ways to get half precision out of TensorRT were tried:
+- `--trt --fp16`: the FP32 graphs, TensorRT picks FP16 layers itself (`trt_fp16_enable`).
+- `--trt --mixed`: the mixed-precision graphs of `py\export_fp16.py` (two attention layers kept in FP32), TensorRT
+  follows the types in the graph.
+- `--trt --mixed --fp16`: both. TensorRT then overrides the graph's FP32 layers, and the result is as far off as
+  the first way, so this one is not used.
+
+Stride 8192 ms (batch windows), whole song, `--fast`. Commands: `cpp\build\Release\pianofi_live.exe --wav
+test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song.wav --stride 512 --fast --dump` plus the options shown.
+
+| path | F1 vs batch | notes (batch) | array check | frame model p50 ms | time model p50 ms | pass p50 / p99 ms | options, `--out` |
+|---|---|---|---|---|---|---|---|
+| CUDA FP32 (16:00 section) | 1.0000 | 1495 (1495) | PASSED, max diff 2.88e-04 | 134.8 | 33.9 | 169.8 / 239.9 | `--out runs\check512` |
+| TensorRT FP32 | 1.0000 | 1495 (1495) | PASSED, max diff 2.91e-04 | 94.2 | 27.8 | 124.3 / 141.9 | `--trt --out runs\trt_check512` |
+| CUDA FP16, mixed graphs (16:00 section) | 0.9980 | 1499 (1495) | FAILED, max diff 3.22e-02 | not recorded here | not recorded here | 92.9 | `--fp16 --out runs\check512_fp16` |
+| TensorRT, mixed graphs | 0.9977 | 1500 (1495) | FAILED, max diff 5.47e-02 | 42.6 | 12.5 | 56.6 / 66.5 | `--trt --mixed --out runs\trt_check512_mixed` |
+| TensorRT, its own FP16 | 0.9830 | 1506 (1495) | FAILED, max diff 2.57e-01 | 38.5 | 9.8 | 49.6 / 61.1 | `--trt --fp16 --out runs\trt_check512_fp16` |
+| TensorRT, mixed graphs and its own FP16 | 0.9820 | 1503 (1495) | FAILED, max diff 2.57e-01 | not recorded here | not recorded here | 48.4 / 64.4 | `--trt --mixed --fp16 --out runs\trt_check512_mixed_fp16` |
+
+Real time, stride 256 ms + delay 256 ms, first 60 s of the same song. Commands: `cpp\build\Release\pianofi_live.exe --wav
+test_audio\16k\686610__seth_makes_sounds__bubbglegum-pop-song_first60s.wav --stride 16 --delay 16 --dump` plus the options shown.
+
+| path | F1 vs batch | notes (batch) | frame model p50 ms | time model p50 ms | pass p50 / p99 ms | frame lag p50 / p99 ms | options, `--out` |
+|---|---|---|---|---|---|---|---|
+| CUDA FP32 (16:00 section) | 0.9233 | 769 (756) | 4.7 | 36.2 | 41.1 / 45.3 | 992 / 1114 | `--out runs\fp32_s16_d16_rt` |
+| TensorRT FP32 | 0.9233 | 769 (756) | 3.4 | 28.8 | 32.3 / 34.1 | 983 / 1104 | `--trt --out runs\trt_fp32_s16_d16_rt` |
+| CUDA FP16, mixed graphs (16:00 section) | 0.9221 | 771 (756) | 4.3 | 22.7 | 26.9 / 30.0 | 979 / 1100 | `--fp16 --out runs\fp16_s16_d16_rt` |
+| TensorRT, mixed graphs | 0.9228 | 772 (756) | 2.2 | 13.6 | 15.8 / 19.3 | 967 / 1089 | `--trt --mixed --out runs\trt_mixed_s16_d16_rt` |
+| TensorRT, mixed graphs, second run | not measured | not recorded here | not recorded here | not recorded here | 16.6 / 18.7 | not recorded here | `--trt --mixed --out runs\trt_mixed_s16_d16_rt2` (no `--dump`) |
+| TensorRT, its own FP16 | 0.9214 | 783 (756) | 2.2 | 12.5 | 14.7 / 16.3 | 966 / 1087 | `--trt --fp16 --out runs\trt_fp16_s16_d16_rt` |
+
+- TensorRT in FP32 is exact (stride 512: F1 1.0000, array check PASSED) and 21% faster in real time (41.1 to 32.3 ms).
+- TensorRT on the mixed graphs: 15.8 ms a pass against 26.9 ms for the same graphs on the CUDA provider (41% less)
+  and 41.1 ms for CUDA FP32 (62% less), at F1 0.9228 (CUDA FP16 0.9221, FP32 0.9233). At stride 512 it stays
+  at F1 0.9977 (CUDA FP16 0.9980).
+- TensorRT's own choice of FP16 layers is about 1 ms faster again but less accurate: F1 0.9830 at stride 512 and
+  max diff 2.57e-01, 8 times the mixed graphs' 3.22e-02 on CUDA. It does not know about the two layers that overflow.
+- A first try of the stride 512 runs failed: the shape range given to TensorRT ended at 576 input frames, and the
+  first pass of a stride 512 run sends 608 (32 + 512 new frames, plus 64 margin). The range now ends at 608.
+
+Not measured: GPU memory with TensorRT, the T4, more than one engine, engine build time on the T4.
+
