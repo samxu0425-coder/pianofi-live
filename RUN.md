@@ -126,7 +126,8 @@ Open http://localhost:8000, pick a song and press Play. You hear the song and se
 sound after a click. Engine logs stay on this console. Ctrl+C quits.
 
 Every open page is its own session: its own engine, song, notes and run folder
-(`runs\ui\session-N`). `--max-sessions` (default 2, what one T4 keeps up with) caps the engines
+(`runs\ui\session-N`). `--max-sessions` (default 2, what one T4 keeps up with in FP32; 4 with `--fp16`, which runs the
+engines on the half-precision graphs) caps the engines
 running at once; a page past the cap sees "All 2 engine slots are in use". Closing a page stops its
 engine. This is the shape the cloud version uses: one engine per user, N per GPU.
 
@@ -401,7 +402,8 @@ Two machines, both made by `infra/deploy/`:
 
 - **GPU box**: spot `g4dn.xlarge` (persistent request: a reclaim stops it, AWS restarts it when
   capacity returns), running the service image (`docker build --target service`: the engine plus
-  `ui/server.py`, one engine per connected page, two at once). It has no public ports except SSH
+  `ui/server.py --max-sessions 4 --fp16`, one engine per connected page, four at once in half
+  precision; results.md, "Tesla T4 with the TopK graphs"). It has no public ports except SSH
   from one address; its page and event ports (8000, 8001) answer only the front. It stops itself
   after `max_minutes` (default 8 hours, about $2 of T4 time).
 - **Front**: a `t4g.nano` (about $3 a month) that holds the fixed address and runs Caddy as a plain
@@ -446,6 +448,10 @@ terraform -chdir=infra/deploy destroy
   `scp -i ~\.ssh\pianofi_live -r deploy\front ec2-user@<public_ip>:` then
   `ssh ... "sudo bash front/install.sh"`. A change that only touches the first-boot script makes
   Terraform stop and start the front (about 1 minute; the address and certificate survive).
+- `run.sh` starts the service container last, after the idle-stop timer is installed. A
+  `systemctl daemon-reload` takes the GPU away from containers that are already running: the
+  engines then log `CUDA unavailable ... using CPU` and no notes arrive. Check with
+  `sudo docker exec service nvidia-smi`; `sudo docker restart service` brings the GPU back.
 - On the GPU box, `ADMIN=sam IDLE_MINUTES=30 ./deploy/run.sh` are the defaults; `IDLE_MINUTES=0`
   turns the idle stop off.
 - The first build on the box takes a few minutes (CUDA image, ONNX Runtime, compile, `pf_tests`);

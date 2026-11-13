@@ -16,13 +16,6 @@ sudo docker build -q --target service -t pianofi-live-service . >/dev/null
 sudo docker network create pianofi 2>/dev/null || true
 sudo docker rm -f service caddy 2>/dev/null || true
 
-# One engine per page, two at once: what a T4 keeps up with (results.md). The ports are
-# only reachable from the front machine (security group), or from Caddy on this box.
-sudo docker run -d --name service --network pianofi --restart unless-stopped --gpus all \
-  -p 8000:8000 -p 8001:8001 \
-  -v "$PWD/models:/work/models:ro" -v "$PWD/songs:/work/songs" -v "$PWD/runs:/work/runs" \
-  pianofi-live-service python3 /app/ui/server.py --host 0.0.0.0 --songs /work/songs --max-sessions 2 --admin "$ADMIN"
-
 # Stop the machine when nobody has played for a while (deploy/idle_stop.sh, once a minute).
 if [ "$IDLE_MINUTES" -gt 0 ]; then
   sudo install -m 755 deploy/idle_stop.sh /usr/local/bin/pianofi-idle-stop
@@ -49,6 +42,17 @@ UNIT
 else
   sudo systemctl disable --now pianofi-idle-stop.timer 2>/dev/null || true
 fi
+
+# Started after the systemd setup above on purpose: a `systemctl daemon-reload` takes the GPU away
+# from containers that are already running (nvidia-smi inside says "Failed to initialize NVML"),
+# and the engines then fall back to the CPU.
+# One engine per page, four at once on the half-precision graphs: what a T4 keeps up with
+# (results.md, "Tesla T4 with the TopK graphs"; in FP32 it is two). The ports are
+# only reachable from the front machine (security group), or from Caddy on this box.
+sudo docker run -d --name service --network pianofi --restart unless-stopped --gpus all \
+  -p 8000:8000 -p 8001:8001 \
+  -v "$PWD/models:/work/models:ro" -v "$PWD/songs:/work/songs" -v "$PWD/runs:/work/runs" \
+  pianofi-live-service python3 /app/ui/server.py --host 0.0.0.0 --songs /work/songs --max-sessions 4 --fp16 --admin "$ADMIN"
 
 if [ $# -eq 3 ]; then
   site=$1; user=$2; hash=$3
