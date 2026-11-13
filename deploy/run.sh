@@ -53,13 +53,14 @@ sudo docker run --rm --gpus all -v "$PWD/models:/work/models" -v "$PWD/songs:/wo
   pianofi-live-service /app/pianofi_live --wav "$song" --stride 16 --delay 16 --trt --mixed --fast \
   --max-seconds 5 --out /tmp/warm 2>&1 | grep -E "provider|unavailable" || echo "warning: the TensorRT warm-up run failed"
 
-# One engine per page, five at once on TensorRT with the mixed-precision graphs: what fits in a
-# T4's memory (results.md, "Tesla T4 with TensorRT"; four with --fp16, two in FP32). The ports
-# are only reachable from the front machine (security group), or from Caddy on this box.
+# One engine per page, eight at once on TensorRT with the mixed-precision graphs. Nine kept up
+# on a T4 (1.4 GB and about 30 ms a pass each; results.md, "Tesla T4, TensorRT sized for the
+# live input"); eight leaves room. The ports are only reachable from the front machine
+# (security group), or from Caddy on this box.
 sudo docker run -d --name service --network pianofi --restart unless-stopped --gpus all \
   -p 8000:8000 -p 8001:8001 \
   -v "$PWD/models:/work/models:ro" -v "$PWD/songs:/work/songs" -v "$PWD/runs:/work/runs" \
-  pianofi-live-service python3 /app/ui/server.py --host 0.0.0.0 --songs /work/songs --max-sessions 5 --trt --admin "$ADMIN"
+  pianofi-live-service python3 /app/ui/server.py --host 0.0.0.0 --songs /work/songs --max-sessions 8 --trt --admin "$ADMIN"
 
 if [ $# -eq 3 ]; then
   site=$1; user=$2; hash=$3

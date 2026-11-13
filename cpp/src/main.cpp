@@ -277,6 +277,8 @@ int main(int argc, char** argv) {
             mopt.trt = true;
             mopt.trt_fp16 = fp16;
             mopt.trt_opt_frames = cfg.stride + 2 * pf::kMargin;
+            // The first pass computes frames -32 .. stride + delay, plus 32 of margin on each side.
+            mopt.trt_max_frames = cfg.stride + cfg.delay + 3 * pf::kMargin;
             mopt.trt_cache = models + "/trt_cache";
             fs::create_directories(mopt.trt_cache);
         }

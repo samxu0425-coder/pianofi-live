@@ -43,8 +43,9 @@ void add_tensorrt(Ort::SessionOptions& so, const ModelOptions& opt, int spec_fra
         const std::string pre = "spec:1x" + std::to_string(kBins) + "x";
         kv.push_back({"trt_profile_min_shapes", pre + std::to_string(2 * kMargin + 1)});
         kv.push_back({"trt_profile_opt_shapes", pre + std::to_string(spec_frames)});
-        // The first pass of a stride 512 run asks for 32 + 512 frames at once: 544 + 64 in.
-        kv.push_back({"trt_profile_max_shapes", pre + std::to_string(3 * kMargin + kWindow)});
+        // TensorRT reserves memory for the largest shape it is promised, so promise only what
+        // this run can send: 2.8 GB an engine with the 608-frame maximum, 1.7 GB with 128.
+        kv.push_back({"trt_profile_max_shapes", pre + std::to_string(opt.trt_max_frames)});
     }
     std::vector<const char*> keys, values;
     for (auto& [k, v] : kv) { keys.push_back(k.c_str()); values.push_back(v.c_str()); }

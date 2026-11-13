@@ -60,12 +60,14 @@ Everything below is from `results.md`, which has the exact command for each row.
 | same, FP16 on TensorRT | 0.9222 | 30 ms | 980 / 1100 ms | AWS g4dn.xlarge spot (Tesla T4) |
 | two engines sharing the T4 | 0.9233 | 98 and 99 ms | 1049 / 1170 ms | AWS g4dn.xlarge spot (Tesla T4) |
 | four engines sharing the T4, FP16 | 0.9227 | 96 to 135 ms | 1091 / 1214 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
-| five engines sharing the T4, FP16 on TensorRT (what the site runs) | 0.9222 | 30 to 64 ms | 1014 / 1137 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
+| eight engines sharing the T4, FP16 on TensorRT (what the site runs) | 0.9228 | 33 to 84 ms | 1036 / 1183 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
+| nine engines sharing the T4, FP16 on TensorRT | 0.9228 | 46 to 126 ms | 1074 / 1220 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
 | stride 128 ms, no delay (measured before the two speedups below) | 0.9009 | 43 ms | 675 / 740 ms | RTX 4070 |
 
 - A per-node profile showed ONNX Runtime running one small node (the velocity ArgMax) on the CPU, where it stalled on the thread pool. Exporting it as TopK moved it to the GPU: the pass on the 4070 went from 63 to 41 ms with identical notes.
 - Half precision cuts the pass again (41 to 27 ms on the 4070, 97 to 51 ms on the T4) and GPU memory by 20%, for 0.001 F1. Two attention layers overflow in FP16 and stay in FP32. In FP32 a T4 keeps up with two engines and falls behind with three; in FP16 it keeps up with four.
-- TensorRT (NVIDIA's inference compiler, used through ONNX Runtime) cuts the half-precision pass again: 27 to 16 ms on the 4070 and 51 to 30 ms on the T4, and in FP32 it still matches batch exactly. Left to pick its own FP16 layers it loses accuracy (F1 0.983 at stride 512), so it gets the same mixed-precision graphs and scores 0.998. On the T4 the limit is now GPU memory: five engines fit, a sixth does not.
+- TensorRT (NVIDIA's inference compiler, used through ONNX Runtime) cuts the half-precision pass again: 27 to 16 ms on the 4070 and 51 to 30 ms on the T4, and in FP32 it still matches batch exactly. Left to pick its own FP16 layers it loses accuracy (F1 0.983 at stride 512), so it gets the same mixed-precision graphs and scores 0.998. That left GPU memory as the limit on the T4: five engines fit, a sixth did not.
+- TensorRT reserves memory for the largest input it is promised, and the engine was promising the 608 frames of the exactness check to every live session, which sends 128 at most. Promising only what the run can send cut an engine from 2.6 to 1.4 GB on the T4, and nine engines now keep up on one card where FP32 on the CUDA provider held two.
 - Through the deployed site in us-east-1, from my PC, the end-to-end lag (sample leaves the browser to its note arriving back) measured 1.08 to 1.10 s median, so the network adds under 0.1 s.
 - The lock-free ring buffer pushes a block in 300 ns at p99 against 2800 ns for the mutex version, with a worst case 7 to 11 times lower.
 - On the CPU the model does not keep up (real-time factor above 1 at every stride), so a GPU is required.
@@ -165,7 +167,7 @@ Longer evaluations live in `eval/`: `sweep.py` runs the settings grid, `level_ev
 
 The site is two AWS machines, both created by `infra/deploy/` with Terraform:
 
-- A **GPU box**, a persistent spot `g4dn.xlarge` (one T4), running the service image from the `Dockerfile`: the engine plus `ui/server.py`, five engines at once on TensorRT in half precision. It shuts itself down after 30 minutes with no engine running, and a stopped box costs only its disk.
+- A **GPU box**, a persistent spot `g4dn.xlarge` (one T4), running the service image from the `Dockerfile`: the engine plus `ui/server.py`, eight engines at once on TensorRT in half precision. It shuts itself down after 30 minutes with no engine running, and a stopped box costs only its disk.
 - A **front**, a `t4g.nano` with a fixed address, running Caddy: HTTPS with a Let's Encrypt certificate, two logins, and a proxy to the GPU box. When the box is stopped, the front serves an offline page with a **Start the engine** button instead of going dark. The admin login can add songs and start the box as often as needed; the guest login can play and transcribe and gets three starts a day. The button calls `aws ec2 start-instances` through an IAM role that allows exactly that one instance.
 
 ```sh
@@ -177,8 +179,9 @@ Then copy the code, model and songs to the GPU box and run `deploy/run.sh` there
 ## Roadmap
 
 - [x] Half precision (FP16) with the two overflowing attention layers kept in FP32
-- [x] TensorRT through ONNX Runtime, deployed: five users per T4, up from two
-- [ ] Less GPU memory per engine (2.5 GB now), which is what caps a T4 at five users
+- [x] TensorRT through ONNX Runtime, deployed: eight users per T4, up from two
+- [x] Less GPU memory per engine: 2.6 GB to 1.4 GB on the T4
+- [ ] One engine process for all sessions, so the weights and the GPU setup are loaded once
 - [ ] GPU-side cache (IOBinding) so the 512-frame window is not copied to the GPU every pass
 - [ ] A real domain instead of the sslip.io address
 

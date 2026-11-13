@@ -34,6 +34,7 @@ struct ModelOptions {
     bool trt = false;
     bool trt_fp16 = false;       // let TensorRT pick FP16 layers (it takes the FP32 graphs)
     int trt_opt_frames = 80;     // the usual frame.onnx input length: stride + 64
+    int trt_max_frames = 608;    // the longest: the first pass, stride + delay + 96
     std::string trt_cache;
 };
 
