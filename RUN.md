@@ -127,7 +127,7 @@ sound after a click. Engine logs stay on this console. Ctrl+C quits.
 
 Every open page is its own session: its own engine, song, notes and run folder
 (`runs\ui\session-N`). `--max-sessions` (default 2, what one T4 keeps up with in FP32; 4 with `--fp16`, which runs the
-engines on the half-precision graphs) caps the engines
+engines on the half-precision graphs; 5 with `--trt`, TensorRT on those graphs) caps the engines
 running at once; a page past the cap sees "All 2 engine slots are in use". Closing a page stops its
 engine. This is the shape the cloud version uses: one engine per user, N per GPU.
 
@@ -230,6 +230,33 @@ scores in FP32: in FP16 they overflow and every output becomes NaN. `py\attentio
 prints the largest score per layer, which is where that list of two comes from; run it again if the model or
 the style changes. It is not exact, so with `--fp16` the stride 512 array check fails by design and F1 is
 slightly under 1; the step 4 checks stay on FP32. Numbers: results.md, "FP16 on the CUDA provider".
+
+### TensorRT
+
+`--trt` puts ONNX Runtime's TensorRT provider in front of the CUDA provider. It needs the TensorRT
+10.4 libraries on PATH, which ship as a pip package (libraries only, 1 GB; the Dockerfile installs
+the Linux one):
+
+```powershell
+.venv\Scripts\python.exe -m pip download tensorrt-cu12-libs==10.4.0 --no-deps --extra-index-url https://pypi.nvidia.com -d C:\libs\tensorrt-dl
+mkdir C:\libs\tensorrt-10.4
+tar -xf C:\libs\tensorrt-dl\tensorrt_cu12_libs-10.4.0-py2.py3-none-win_amd64.whl -C C:\libs\tensorrt-10.4
+$env:PATH = "C:\libs\tensorrt-10.4\tensorrt_libs;" + $env:PATH
+cpp\build\Release\pianofi_live.exe --wav test_audio\16k\<song>.wav --stride 512 --fast --trt --dump --out runs\trt_check512
+cpp\build\Release\pianofi_live.exe --wav test_audio\16k\<song>_first60s.wav --stride 16 --delay 16 --trt --mixed --dump --out runs\trt_mixed_s16_d16_rt
+```
+
+- The `.whl` is a zip file; Windows' own `tar` unpacks it.
+- `--trt` alone runs the FP32 graphs and must still pass the stride 512 check exactly (array check
+  PASSED, F1 = 1.0000). `--trt --mixed` runs the mixed-precision graphs of `py\export_fp16.py`: the
+  fast path, not exact, like `--fp16`.
+- `--trt --fp16` lets TensorRT choose FP16 layers itself. It is less accurate (F1 0.9830 at stride
+  512 against 0.9977), because it does not keep the two overflowing attention layers in FP32.
+- The first run of each variant builds the engines (10 to 30 s on the RTX 4070, about 40 s on the
+  T4) and keeps them in `models\trt_cache`. They belong to one GPU model; delete the folder after
+  exporting the model again.
+- If the TensorRT DLLs are not found the engine says `CUDA unavailable (... onnxruntime_providers_tensorrt.dll ...)`
+  and runs on the CPU.
 
 ### Where a pass spends its time
 
@@ -402,8 +429,8 @@ Two machines, both made by `infra/deploy/`:
 
 - **GPU box**: spot `g4dn.xlarge` (persistent request: a reclaim stops it, AWS restarts it when
   capacity returns), running the service image (`docker build --target service`: the engine plus
-  `ui/server.py --max-sessions 4 --fp16`, one engine per connected page, four at once in half
-  precision; results.md, "Tesla T4 with the TopK graphs"). It has no public ports except SSH
+  `ui/server.py --max-sessions 5 --trt`, one engine per connected page, five at once on TensorRT
+  with the mixed-precision graphs; results.md, "Tesla T4 with TensorRT"). It has no public ports except SSH
   from one address; its page and event ports (8000, 8001) answer only the front. It stops itself
   after `max_minutes` (default 8 hours, about $2 of T4 time).
 - **Front**: a `t4g.nano` (about $3 a month) that holds the fixed address and runs Caddy as a plain
@@ -448,6 +475,10 @@ terraform -chdir=infra/deploy destroy
   `scp -i ~\.ssh\pianofi_live -r deploy\front ec2-user@<public_ip>:` then
   `ssh ... "sudo bash front/install.sh"`. A change that only touches the first-boot script makes
   Terraform stop and start the front (about 1 minute; the address and certificate survive).
+- `run.sh` first builds the TensorRT engines with a 5 s run of the engine (about 40 s on a new
+  machine, seconds after that): they are kept in `models/trt_cache`, and the service mounts
+  `models` read-only. Five sessions is what fits in the T4's memory; a sixth engine gets no GPU
+  memory and falls back to the CPU without failing, so do not raise `--max-sessions` past 5.
 - `run.sh` starts the service container last, after the idle-stop timer is installed. A
   `systemctl daemon-reload` takes the GPU away from containers that are already running: the
   engines then log `CUDA unavailable ... using CPU` and no notes arrive. Check with

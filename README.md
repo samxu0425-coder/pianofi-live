@@ -28,7 +28,7 @@ If the page says the engine is offline, press **Start the engine** and the GPU m
 
 [AMT-APC](https://github.com/misya11p/amt-apc) is a model that turns a song into a piano cover, but it works on whole files: you give it a song, wait, and get a MIDI file back. PianoFi Live runs the same model on audio as it arrives, so the cover shows up while the song is still playing.
 
-The catch is that the model wants to see 0.5 s of future audio for every frame it transcribes, and each pass looks at an 8 s window. Running it the batch way on a live stream would mean redoing the whole window every few hundred milliseconds. The engine splits the model in two so that the per-frame half runs once per frame and is cached, and only the lighter time half is rerun over the window. That brings one pass down to about 40 ms on an RTX 4070 (27 ms in half precision) and keeps the GPU memory at 3 GB instead of 6.
+The catch is that the model wants to see 0.5 s of future audio for every frame it transcribes, and each pass looks at an 8 s window. Running it the batch way on a live stream would mean redoing the whole window every few hundred milliseconds. The engine splits the model in two so that the per-frame half runs once per frame and is cached, and only the lighter time half is rerun over the window. That brings one pass down to about 40 ms on an RTX 4070 (16 ms with TensorRT in half precision) and keeps the GPU memory at 3 GB instead of 6.
 
 Lag is about 1 s end to end: 0.5 s is the model's lookahead and cannot be removed, and the rest is the window stride plus a deliberate delay that buys back accuracy (the engine gives each frame a little more future context before committing to it).
 
@@ -54,21 +54,25 @@ Everything below is from `results.md`, which has the exact command for each row.
 | stride 512 frames (batch windows) | 1.0000 | 170 ms (4070), 443 ms (T4) | n/a | RTX 4070 and a T4: identical output |
 | stride 256 ms + delay 256 ms (the default) | 0.9233 | 41 ms | 992 / 1114 ms | RTX 4070 |
 | same, half precision (FP16) | 0.9221 | 27 ms | 979 / 1100 ms | RTX 4070 |
+| same, FP16 on TensorRT | 0.9228 | 16 ms | 967 / 1089 ms | RTX 4070 |
 | the default, on the cloud machine | 0.9233 | 97 ms | 1047 / 1167 ms | AWS g4dn.xlarge spot (Tesla T4) |
 | same, half precision (FP16) | 0.9227 | 51 ms | 1001 / 1121 ms | AWS g4dn.xlarge spot (Tesla T4) |
+| same, FP16 on TensorRT | 0.9222 | 30 ms | 980 / 1100 ms | AWS g4dn.xlarge spot (Tesla T4) |
 | two engines sharing the T4 | 0.9233 | 98 and 99 ms | 1049 / 1170 ms | AWS g4dn.xlarge spot (Tesla T4) |
-| four engines sharing the T4, FP16 (what the site runs) | 0.9227 | 96 to 135 ms | 1091 / 1214 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
+| four engines sharing the T4, FP16 | 0.9227 | 96 to 135 ms | 1091 / 1214 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
+| five engines sharing the T4, FP16 on TensorRT (what the site runs) | 0.9222 | 30 to 64 ms | 1014 / 1137 ms (slowest engine) | AWS g4dn.xlarge spot (Tesla T4) |
 | stride 128 ms, no delay (measured before the two speedups below) | 0.9009 | 43 ms | 675 / 740 ms | RTX 4070 |
 
 - A per-node profile showed ONNX Runtime running one small node (the velocity ArgMax) on the CPU, where it stalled on the thread pool. Exporting it as TopK moved it to the GPU: the pass on the 4070 went from 63 to 41 ms with identical notes.
 - Half precision cuts the pass again (41 to 27 ms on the 4070, 97 to 51 ms on the T4) and GPU memory by 20%, for 0.001 F1. Two attention layers overflow in FP16 and stay in FP32. In FP32 a T4 keeps up with two engines and falls behind with three; in FP16 it keeps up with four.
+- TensorRT (NVIDIA's inference compiler, used through ONNX Runtime) cuts the half-precision pass again: 27 to 16 ms on the 4070 and 51 to 30 ms on the T4, and in FP32 it still matches batch exactly. Left to pick its own FP16 layers it loses accuracy (F1 0.983 at stride 512), so it gets the same mixed-precision graphs and scores 0.998. On the T4 the limit is now GPU memory: five engines fit, a sixth does not.
 - Through the deployed site in us-east-1, from my PC, the end-to-end lag (sample leaves the browser to its note arriving back) measured 1.08 to 1.10 s median, so the network adds under 0.1 s.
 - The lock-free ring buffer pushes a block in 300 ns at p99 against 2800 ns for the mutex version, with a worst case 7 to 11 times lower.
 - On the CPU the model does not keep up (real-time factor above 1 at every stride), so a GPU is required.
 
 ### Built with
 
-- C++17, CMake, and [ONNX Runtime](https://onnxruntime.ai/) 1.20 with CUDA for the engine
+- C++17, CMake, and [ONNX Runtime](https://onnxruntime.ai/) 1.20 with its CUDA and [TensorRT](https://developer.nvidia.com/tensorrt) providers for the engine
 - [miniaudio](https://miniaud.io/) for microphone and WASAPI loopback capture (no virtual cable needed)
 - [AMT-APC](https://github.com/misya11p/amt-apc) (a fine-tuned hFT-Transformer) for the piano covers, exported to ONNX with PyTorch
 - Python 3.11+ for the export, checks and scoring: [mir_eval](https://github.com/mir-evaluation/mir_eval), soundfile, [websockets](https://websockets.readthedocs.io/)
@@ -138,7 +142,7 @@ cpp\build\Release\pianofi_live.exe --input loopback --stride 16 --delay 16
 cpp\build\Release\pianofi_live.exe --list-devices
 ```
 
-`--stride` is in frames of 16 ms (16 = a pass every 256 ms) and `--delay` is extra lookahead in frames. The engine refuses to start while another engine is running on the machine, because two on one GPU fight over memory and both fall behind; `--max-engines N` allows more.
+`--stride` is in frames of 16 ms (16 = a pass every 256 ms) and `--delay` is extra lookahead in frames. Two switches trade exactness for speed: `--fp16` runs the half-precision graphs (`python py/export_fp16.py` writes them), and `--trt --mixed` runs those graphs on TensorRT, the fastest path (`RUN.md` has the TensorRT setup). `--trt` alone is TensorRT in FP32, which still matches batch exactly. The engine refuses to start while another engine is running on the machine, because two on one GPU fight over memory and both fall behind; `--max-engines N` allows more.
 
 ## Running the tests
 
@@ -161,7 +165,7 @@ Longer evaluations live in `eval/`: `sweep.py` runs the settings grid, `level_ev
 
 The site is two AWS machines, both created by `infra/deploy/` with Terraform:
 
-- A **GPU box**, a persistent spot `g4dn.xlarge` (one T4), running the service image from the `Dockerfile`: the engine plus `ui/server.py`, four engines at once in half precision. It shuts itself down after 30 minutes with no engine running, and a stopped box costs only its disk.
+- A **GPU box**, a persistent spot `g4dn.xlarge` (one T4), running the service image from the `Dockerfile`: the engine plus `ui/server.py`, five engines at once on TensorRT in half precision. It shuts itself down after 30 minutes with no engine running, and a stopped box costs only its disk.
 - A **front**, a `t4g.nano` with a fixed address, running Caddy: HTTPS with a Let's Encrypt certificate, two logins, and a proxy to the GPU box. When the box is stopped, the front serves an offline page with a **Start the engine** button instead of going dark. The admin login can add songs and start the box as often as needed; the guest login can play and transcribe and gets three starts a day. The button calls `aws ec2 start-instances` through an IAM role that allows exactly that one instance.
 
 ```sh
@@ -172,6 +176,9 @@ Then copy the code, model and songs to the GPU box and run `deploy/run.sh` there
 
 ## Roadmap
 
+- [x] Half precision (FP16) with the two overflowing attention layers kept in FP32
+- [x] TensorRT through ONNX Runtime, deployed: five users per T4, up from two
+- [ ] Less GPU memory per engine (2.5 GB now), which is what caps a T4 at five users
 - [ ] GPU-side cache (IOBinding) so the 512-frame window is not copied to the GPU every pass
 - [ ] A real domain instead of the sslip.io address
 

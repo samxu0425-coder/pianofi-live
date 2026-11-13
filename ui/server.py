@@ -200,6 +200,8 @@ async def main() -> None:
     parser.add_argument("--delay", type=int, default=16, help="delay in frames, 16 ms each")
     parser.add_argument("--max-sessions", type=int, default=2,
                         help="engines allowed at once, one per page that pressed Play (a T4 keeps up with 2, 4 with --fp16)")
+    parser.add_argument("--trt", action="store_true",
+                        help="run the engines on TensorRT with the mixed-precision graphs (engine --trt --mixed)")
     parser.add_argument("--fp16", action="store_true",
                         help="run the engines on the half-precision graphs (models/*_fp16.onnx, py/export_fp16.py)")
     parser.add_argument("--admin", default="",
@@ -252,7 +254,7 @@ async def main() -> None:
                     source += ["--start-seconds", f"{start:.3f}"]
             self.engine = await asyncio.create_subprocess_exec(
                 str(find_exe()), *source, "--stride", str(args.stride), "--delay", str(args.delay),
-                "--events", "--max-engines", str(args.max_sessions), *(["--fp16"] if args.fp16 else []),
+                "--events", "--max-engines", str(args.max_sessions), *(["--trt", "--mixed"] if args.trt else ["--fp16"] if args.fp16 else []),
                 "--out", str(WORK / "runs" / "ui" / f"session-{self.id}"),
                 cwd=WORK, env=engine_env(), stdout=asyncio.subprocess.PIPE,  # stderr stays on this console
                 stdin=asyncio.subprocess.PIPE if browser_audio else None,

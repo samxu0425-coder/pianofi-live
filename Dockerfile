@@ -15,7 +15,17 @@ RUN apt-get update \
     | tar -xz -C /opt \
  && mv /opt/onnxruntime-linux-x64-gpu-${ORT_VERSION} /opt/onnxruntime \
  && rm -rf /var/lib/apt/lists/*
-ENV LD_LIBRARY_PATH=/opt/onnxruntime/lib
+# TensorRT 10.4 libraries for ONNX Runtime's TensorRT provider (the engine's --trt): the same
+# version as on Windows, NVIDIA's own package, libraries only.
+ARG TRT_VERSION=10.4.0
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends unzip \
+ && curl -fsSL -o /tmp/trt.whl https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-${TRT_VERSION}-py2.py3-none-manylinux_2_17_x86_64.whl \
+ && unzip -q /tmp/trt.whl 'tensorrt_libs/*' -d /opt/tensorrt \
+ && rm /tmp/trt.whl \
+ && apt-get purge -y unzip \
+ && rm -rf /var/lib/apt/lists/*
+ENV LD_LIBRARY_PATH=/opt/onnxruntime/lib:/opt/tensorrt/tensorrt_libs
 
 # Build stage: compiler and CMake stay out of the final image.
 FROM base AS build
