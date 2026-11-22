@@ -3,10 +3,10 @@
 Play any song and watch its piano cover appear as notes on a scrolling piano roll, about one second behind the music. A C++ engine streams audio through a piano-cover transcription model in real time, from a file, a microphone, or whatever your PC is playing.
 
 **Live:** https://54-174-0-35.sslip.io
-&nbsp;·&nbsp; log in as `guest` with password `NJNAvBYK5pBKXd6T`
+&nbsp;·&nbsp; no login needed
 &nbsp;·&nbsp; [Report a bug](https://github.com/samxu0425-coder/pianofi-live/issues)
 
-If the page says the engine is offline, press **Start the engine** and the GPU machine boots in about 20 s. The guest login gets three starts a day and cannot add songs.
+If the page says the engine is offline, press **Start the engine** and the GPU machine boots in about 20 s. Visitors share three starts a day and cannot add songs.
 
 ## Contents
 
@@ -168,7 +168,7 @@ Longer evaluations live in `eval/`: `sweep.py` runs the settings grid, `level_ev
 The site is two AWS machines, both created by `infra/deploy/` with Terraform:
 
 - A **GPU box**, a persistent spot `g4dn.xlarge` (one T4), running the service image from the `Dockerfile`: the engine plus `ui/server.py`, eight engines at once on TensorRT in half precision. It shuts itself down after 30 minutes with no engine running, and a stopped box costs only its disk.
-- A **front**, a `t4g.nano` with a fixed address, running Caddy: HTTPS with a Let's Encrypt certificate, two logins, and a proxy to the GPU box. When the box is stopped, the front serves an offline page with a **Start the engine** button instead of going dark. The admin login can add songs and start the box as often as needed; the guest login can play and transcribe and gets three starts a day. The button calls `aws ec2 start-instances` through an IAM role that allows exactly that one instance.
+- A **front**, a `t4g.nano` with a fixed address, running Caddy: HTTPS with a Let's Encrypt certificate, an admin login at `/login`, and a proxy to the GPU box. When the box is stopped, the front serves an offline page with a **Start the engine** button instead of going dark. The admin login can add songs and start the box as often as needed; everyone else is a guest with no password, who can play and transcribe and shares three starts a day. The button calls `aws ec2 start-instances` through an IAM role that allows exactly that one instance.
 
 ```sh
 terraform -chdir=infra/deploy apply

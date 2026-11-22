@@ -438,11 +438,13 @@ Two machines, both made by `infra/deploy/`:
   after `max_minutes` (default 8 hours, about $2 of T4 time).
 - **Front**: a `t4g.nano` (about $3 a month) that holds the fixed address and runs Caddy as a plain
   binary (no Docker: 512 MB is not enough to install it): HTTPS with a Let's Encrypt certificate
-  for `<ip-with-dashes>.sslip.io`, two logins, and a proxy to the GPU box over the VPC. When the
+  for `<ip-with-dashes>.sslip.io`, the admin login, and a proxy to the GPU box over the VPC. When the
   box is stopped or reclaimed, the proxy fails and Caddy serves `deploy/front/offline.html`
   ("the piano engine is offline right now") with a **Start the engine** button instead of going dark.
-- **Two logins** (Caddy basic auth; the login name reaches the service as `X-User`, set by Caddy so
-  a client cannot forge it): the admin (`auth_user`, default `sam`) can add songs and start the GPU
+- **Guest by default, one admin login**: a visitor needs no password and is the guest. The admin
+  opens `https://<site>/login` once; the browser asks for the password there (Caddy basic auth) and
+  then sends it with every request. The name reaches the service as `X-User`, set by Caddy so
+  a client cannot forge it: the admin (`auth_user`, default `sam`) can add songs and start the GPU
   box as often as needed; the guest (`guest_user`, default `guest`) can play and transcribe, sees
   no drop box (and the server answers 403 to an upload anyway), and may start the box
   `guest_starts_per_day` times a day (default 3, UTC days, counted in `/opt/pianofi/data/starts.json`
@@ -492,7 +494,8 @@ terraform -chdir=infra/deploy destroy
 - The first build on the box takes a few minutes (CUDA image, ONNX Runtime, compile, `pf_tests`);
   after that `run.sh` restarts in seconds. `run.sh SITE USER HASH` is the old single-box form
   (Caddy on the GPU box itself).
-- The page is `https://<site>`, user `sam` or `guest`, the passwords you hashed. The browser's mic
+- The page is `https://<site>`, no login for a guest; `https://<site>/login` as `sam` with the
+  password you hashed for the admin. The browser's mic
   and tab audio need HTTPS, which is why Caddy is there.
 - Lag through the cloud is measured by the page: "lag (end to end)" is from the sample leaving the
   browser to its note arriving back. The engine's own lag is in `runs/ui/session-N/metrics.json`

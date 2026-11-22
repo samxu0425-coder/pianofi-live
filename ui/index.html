@@ -17,6 +17,7 @@
   #legend { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #9aa0ac; }
   #legend i { width: 80px; height: 8px; border-radius: 4px;
               background: linear-gradient(to right, hsl(220 80% 60%), hsl(110 80% 60%), hsl(0 80% 60%)); }
+  #admin { color: #9aa0ac; }
   #help { padding: 0 16px 6px; color: #5f6675; font-size: 12px; }
   select { font: inherit; padding: 5px 8px; border: 1px solid #3a3f4a; border-radius: 6px; background: #1f232b; color: #e6e8ec; max-width: 320px; }
   #drop { padding: 5px 12px; border: 1px dashed #4a5060; border-radius: 6px; color: #9aa0ac; cursor: pointer; }
@@ -46,6 +47,7 @@
   <span id="view"></span>
   <span id="status">Connecting...</span>
   <span id="legend">quiet <i></i> loud</span>
+  <a id="admin" href="/login" hidden>Admin login</a>
 </header>
 <div id="help">Scroll or drag the roll to look back at earlier notes. Home jumps back to live.
 "A tab's audio" asks which tab or screen to share: tick "Share tab audio" (or "share system audio") in that dialog.</div>
@@ -422,6 +424,7 @@ function handleEvent(e) {
     serverInput = e.input;
     running = e.running;
     canUpload = e.can_upload !== false;
+    document.getElementById("admin").hidden = canUpload;  // a guest behind the front can log in at /login
     if (serverInput === "file") {
       setSongs(e.songs, pendingSong && e.songs.includes(pendingSong) ? pendingSong : e.song);
       pendingSong = null;

@@ -1,14 +1,30 @@
-# The always-on front door (a t4g.nano): HTTPS, the two logins, and a proxy to the GPU
+# The always-on front door (a t4g.nano): HTTPS, the logins, and a proxy to the GPU
 # box over the VPC. When the box is stopped or reclaimed (it is spot), the proxy gets no
-# answer and Caddy serves offline.html instead of an error. The login name travels to
-# the service as X-User (set here, so a client cannot forge it): the service lets only
-# {$AUTH_USER} add songs, and start.py limits a guest's starts of the GPU box.
+# answer and Caddy serves offline.html instead of an error.
+#
+# A visitor needs no password and is the guest. The admin opens /login once: the browser
+# asks for the password there and then sends it with every request to the site. A request
+# that carries a password is always checked. The name travels to the service as X-User
+# (set here, so a client cannot forge it): the service lets only {$AUTH_USER} add songs,
+# and start.py limits a guest's starts of the GPU box.
 {$SITE} {
-	basic_auth {
+	@login header Authorization *
+	@guest not header Authorization *
+	basic_auth @login {
 		{$AUTH_USER} {$AUTH_HASH}
 		{$GUEST_USER} {$GUEST_HASH}
 	}
-	request_header X-User {http.auth.user.id}
+	request_header @login X-User {http.auth.user.id}
+	request_header @guest X-User {$GUEST_USER}
+	handle /login {
+		route {
+			basic_auth {
+				{$AUTH_USER} {$AUTH_HASH}
+				{$GUEST_USER} {$GUEST_HASH}
+			}
+			redir * / 302
+		}
+	}
 	handle /start {
 		reverse_proxy 127.0.0.1:9000
 	}
